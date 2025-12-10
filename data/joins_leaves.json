@@ -224,6 +224,54 @@
           "leaves": 0,
           "lastJoinAt": 1765331658099,
           "lastLeaveAt": null
+        },
+        "1049375285742669835": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765331849856,
+          "lastLeaveAt": null
+        },
+        "648989936607035392": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765332199967,
+          "lastLeaveAt": null
+        },
+        "887792985968869396": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765334733981,
+          "lastLeaveAt": null
+        },
+        "1186010105058168943": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765335186463,
+          "lastLeaveAt": null
+        },
+        "356268235697553409": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765335376362,
+          "lastLeaveAt": null
+        },
+        "1344661415062929438": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765335490618,
+          "lastLeaveAt": null
+        },
+        "952240588055519312": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765335549431,
+          "lastLeaveAt": null
+        },
+        "1380548702648664156": {
+          "joins": 1,
+          "leaves": 0,
+          "lastJoinAt": 1765335569983,
+          "lastLeaveAt": null
         }
       },
       "events": [
@@ -293,6 +341,46 @@
           "userId": "1390632369794318440",
           "type": "join",
           "timestamp": 1765331658099
+        },
+        {
+          "userId": "1049375285742669835",
+          "type": "join",
+          "timestamp": 1765331849856
+        },
+        {
+          "userId": "648989936607035392",
+          "type": "join",
+          "timestamp": 1765332199967
+        },
+        {
+          "userId": "887792985968869396",
+          "type": "join",
+          "timestamp": 1765334733981
+        },
+        {
+          "userId": "1186010105058168943",
+          "type": "join",
+          "timestamp": 1765335186463
+        },
+        {
+          "userId": "356268235697553409",
+          "type": "join",
+          "timestamp": 1765335376362
+        },
+        {
+          "userId": "1344661415062929438",
+          "type": "join",
+          "timestamp": 1765335490618
+        },
+        {
+          "userId": "952240588055519312",
+          "type": "join",
+          "timestamp": 1765335549431
+        },
+        {
+          "userId": "1380548702648664156",
+          "type": "join",
+          "timestamp": 1765335569983
         }
       ]
     }
