@@ -4,7 +4,7 @@ let currentPage = 'dashboard';
 
 const COMMANDS = [
   { name: 'help', description: 'Show available commands' },
-  { name: 'logconfig', description: 'Configure logging settings' },
+  { name: 'logconfig', description: 'Create or sync dedicated log channels' },
   { name: 'ban', description: 'Ban a user' },
   { name: 'kick', description: 'Kick a user' },
   { name: 'mute', description: 'Mute a user' },

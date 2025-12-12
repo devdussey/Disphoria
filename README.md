@@ -20,17 +20,12 @@
    # BOT_OWNER_ID=123456789012345678
    ```
 
-4. Deploy slash commands:
-   ```bash
-   node deploy-commands.js
-   ```
-   > **Note:** Global command deployments can take up to an hour to reach all servers.
-   > To test immediately in specific guilds, set `NODE_ENV=development` and provide `GUILD_IDS` (or `GUILD_ID` for a single guild) before running the deploy script.
-
-5. Start the bot:
+4. Start the bot:
    ```bash
    npm start
    ```
+   *This command now refreshes your slash commands before booting the bot, so you don’t need to run `deploy-commands.js` separately most of the time.*
+   > **Note:** Global command deployments can take up to an hour to reach all servers. If you want to target specific guilds while testing, set `NODE_ENV=development` and provide `GUILD_IDS` (or `GUILD_ID`) before running `npm start` (or `node deploy-commands.js` for a one-off deploy).
 
 ### 4. Development Mode
 Global commands are cached by Discord and may not appear for up to an hour.
