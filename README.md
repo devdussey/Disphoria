@@ -65,4 +65,4 @@ This project is licensed under the MIT License.
 - `GUILD_ID`: Single guild ID for testing if only one guild is needed.
 - `OWNER_FALLBACK_ON_CHANNEL_FAIL`: When set to `true`, if a guild’s log delivery mode is set to `channel` and sending to the configured channel fails (missing/not set/inaccessible), the bot will fall back to DMing bot owners. When unset or `false`, no owner-DM fallback occurs in `channel` mode. Applies to both moderation and security logs.
 - `BOT_OWNER_IDS`: Space or comma separated list of bot owner user IDs. Takes precedence over `BOT_OWNER_ID` when both are set.
-- `BOT_OWNER_ID`: Single bot owner user ID used if `BOT_OWNER_IDS` is unset.
+- `BOT_OWNER_ID`: Single fallback bot owner user ID used when `BOT_OWNER_IDS` is unset (accepts space/comma separated IDs for compatibility).
