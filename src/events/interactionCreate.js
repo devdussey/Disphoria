@@ -6,6 +6,39 @@ const antiNukeManager = require('../utils/antiNukeManager');
 const ticketStore = require('../utils/ticketStore');
 const panelSessions = require('../utils/ticketPanelSessionStore');
 const ticketManager = require('../utils/ticketManager');
+const logSender = require('../utils/logSender');
+const logChannelTypeStore = require('../utils/logChannelTypeStore');
+const logConfigManager = require('../utils/logConfigManager');
+const logConfigView = require('../utils/logConfigView');
+
+async function logCommandUsage(interaction, status, details, color = 0x5865f2) {
+    if (!interaction.guildId) return;
+    const fields = [
+        { name: 'Command', value: `/${interaction.commandName}`, inline: true },
+        { name: 'User', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
+    ];
+    if (interaction.channel) {
+        fields.push({ name: 'Channel', value: `<#${interaction.channel.id}> (${interaction.channel.id})`, inline: true });
+    }
+    if (details) {
+        fields.push({ name: 'Details', value: details, inline: false });
+    }
+    const embed = new EmbedBuilder()
+        .setTitle(`Command ${status}`)
+        .setColor(color)
+        .addFields(fields)
+        .setTimestamp();
+    try {
+        await logSender.sendLog({
+            guildId: interaction.guildId,
+            logType: 'command',
+            embed,
+            client: interaction.client,
+        });
+    } catch (err) {
+        console.error('Failed to log command usage:', err);
+    }
+}
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -25,6 +58,7 @@ module.exports = {
 
             try {
                 await command.execute(interaction);
+                await logCommandUsage(interaction, 'Used', 'Command executed successfully', 0x57f287);
             } catch (error) {
                 const code = error?.code || error?.status;
                 const msg = (error?.message || '').toLowerCase();
@@ -51,6 +85,7 @@ module.exports = {
                     const rcode = replyError?.code;
                     console.warn('Failed to send error via interaction API:', rcode, replyError?.message);
                 }
+                await logCommandUsage(interaction, 'Failed', error?.message || 'Unknown error', 0xed4245);
             }
         }
 
@@ -114,6 +149,21 @@ module.exports = {
                 }
                 return;
             }
+            if (typeof interaction.customId === 'string' && interaction.customId === 'logconfig:category') {
+                if (!interaction.inGuild()) return;
+                if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageGuild)) {
+                    try { await interaction.reply({ content: 'Manage Server permission is required to configure logs.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                try {
+                    const selectedType = interaction.values?.[0];
+                    const view = await logConfigView.buildLogConfigView(interaction.guild, selectedType);
+                    await interaction.update({ embeds: [view.embed], components: view.components });
+                } catch (err) {
+                    console.error('Failed to update log configuration view:', err);
+                }
+                return;
+            }
             if (typeof interaction.customId === 'string' && interaction.customId.startsWith('antinuke:')) {
                 if (!interaction.inGuild()) return;
                 if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageGuild)) {
@@ -150,8 +200,73 @@ module.exports = {
             }
         }
 
+        if (interaction.isChannelSelectMenu()) {
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('logconfig:setchannel:')) {
+                if (!interaction.inGuild()) return;
+                if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageGuild)) {
+                    try { await interaction.reply({ content: 'Manage Server permission is required to configure logs.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                const [, , logType] = interaction.customId.split(':');
+                if (!logType) return;
+                const channelId = interaction.values?.[0];
+                if (!channelId) return;
+                try {
+                    await logChannelTypeStore.setChannel(interaction.guildId, logType, channelId);
+                    const view = await logConfigView.buildLogConfigView(interaction.guild, logType);
+                    await interaction.update({ embeds: [view.embed], components: view.components });
+                    const friendly = logConfigManager.getFriendlyName(logType);
+                    try { await interaction.followUp({ content: `Set ${friendly} logs to <#${channelId}>.`, ephemeral: true }); } catch (_) {}
+                } catch (err) {
+                    console.error('Failed to update log configuration via channel select:', err);
+                    try { await interaction.followUp({ content: 'Failed to assign the selected channel. Please try again.', ephemeral: true }); } catch (_) {}
+                }
+                return;
+            }
+        }
+
         // Handle Verify button
         if (interaction.isButton()) {
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('logconfig:')) {
+                if (!interaction.inGuild()) return;
+                if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageGuild)) {
+                    try { await interaction.reply({ content: 'Manage Server permission is required to configure logs.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                const [, action, logType] = interaction.customId.split(':');
+                if (!logType) return;
+                let followUpContent = null;
+                let handledError = false;
+                try {
+                    if (action === 'toggle') {
+                        const entry = await logChannelTypeStore.getEntry(interaction.guildId, logType);
+                        if (entry) {
+                            await logChannelTypeStore.setEnabled(interaction.guildId, logType, !entry.enabled);
+                        }
+                    } else if (action === 'default') {
+                        const channel = await logConfigManager.ensureDefaultChannelForType(interaction.guild, logType);
+                        const friendly = logConfigManager.getFriendlyName(logType);
+                        if (channel) {
+                            await logChannelTypeStore.setChannel(interaction.guildId, logType, channel.id);
+                            followUpContent = `Default channel for ${friendly} logs set to <#${channel.id}>.`;
+                        } else {
+                            followUpContent = `Could not create a default channel for ${friendly} logs. Please ensure I can manage channels.`;
+                        }
+                    } else {
+                        return;
+                    }
+                    const view = await logConfigView.buildLogConfigView(interaction.guild, logType);
+                    await interaction.update({ embeds: [view.embed], components: view.components });
+                } catch (err) {
+                    handledError = true;
+                    console.error('Failed to update log configuration via button:', err);
+                    try { await interaction.followUp({ content: 'Failed to update logging configuration. Please try again later.', ephemeral: true }); } catch (_) {}
+                }
+                if (!handledError && followUpContent) {
+                    try { await interaction.followUp({ content: followUpContent, ephemeral: true }); } catch (_) {}
+                }
+                return;
+            }
             if (typeof interaction.customId === 'string' && interaction.customId.startsWith('ticket:create:')) {
                 if (!interaction.inGuild()) {
                     try { await interaction.reply({ content: 'Tickets can only be opened in a server.', ephemeral: true }); } catch (_) {}

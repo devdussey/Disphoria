@@ -28,9 +28,15 @@ async function sendLog(options) {
 
   let sentSuccessfully = false;
 
+  // Check whether this log type is enabled before attempting to send
+  const entry = guildId ? await logChannelTypeStore.getEntry(guildId, logType) : null;
+  if (entry && entry.enabled === false) {
+    return false;
+  }
+  const channelId = entry?.channelId;
+
   // Try to send to the configured channel for this log type
   try {
-    const channelId = await logChannelTypeStore.getChannel(guildId, logType);
     if (channelId && client) {
       const guild = client.guilds.cache.get(guildId);
       if (guild) {

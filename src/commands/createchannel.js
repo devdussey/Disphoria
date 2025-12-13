@@ -88,11 +88,14 @@ module.exports = {
       const channel = await interaction.guild.channels.create(channelData);
 
       try {
-        await modlog.log(interaction, 'Channel Created', [
-          { name: 'Channel', value: `${channel} (${channel.id})`, inline: false },
-          { name: 'Type', value: typeInput, inline: true },
-          { name: 'Category', value: category ? `${category} (${category.id})` : 'None', inline: true },
-        ]);
+        await modlog.log(interaction, 'Channel Created', {
+          target: `${channel} (${channel.id})`,
+          reason: `Type: ${typeInput}`,
+          extraFields: [
+            { name: 'Category', value: category ? `${category} (${category.id})` : 'None', inline: true },
+            { name: 'NSFW', value: nsfw ? 'Yes' : 'No', inline: true },
+          ],
+        });
       } catch (err) {
         console.error('Failed to log channel creation', err);
       }

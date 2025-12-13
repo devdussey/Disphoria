@@ -4,6 +4,8 @@ const jlStore = require('../utils/joinLeaveStore');
 const welcomeStore = require('../utils/welcomeStore');
 const blacklist = require('../utils/blacklistStore');
 const logSender = require('../utils/logSender');
+const inviteTracker = require('../utils/inviteTracker');
+const { buildLogEmbed } = require('../utils/logEmbedFactory');
 
 module.exports = {
     name: Events.GuildMemberAdd,
@@ -86,6 +88,62 @@ module.exports = {
             await channel.send({ content: replacer('Welcome {mention}!'), embeds: [base] });
         } catch (e) {
             // swallow
+        }
+
+        // Log the member join to the member log channel
+        try {
+            const embed = buildLogEmbed({
+                action: 'Member Joined',
+                target: member.user,
+                actor: member.user,
+                reason: 'Member joined the server',
+                color: 0x2b2d31,
+                extraFields: [
+                    { name: 'Account created', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+                    { name: 'Guild', value: `${member.guild.name} (${member.guild.id})`, inline: true },
+                ],
+            });
+
+            await logSender.sendLog({
+                guildId: member.guild.id,
+                logType: 'member',
+                embed,
+                client: member.client,
+            });
+        } catch (err) {
+            console.error('Failed to log member join:', err);
+        }
+
+        // Attempt to detect the invite used
+        try {
+            const usedInvite = await inviteTracker.handleMemberJoin(member);
+            if (usedInvite) {
+                const inviteEmbed = buildLogEmbed({
+                    action: 'Invite Used',
+                    target: member.user,
+                    actor: member.user,
+                    reason: `Invite ${usedInvite.code} used`,
+                    color: 0x5865f2,
+                    extraFields: [
+                        { name: 'Channel', value: usedInvite.channelId ? `<#${usedInvite.channelId}>` : 'Unknown', inline: true },
+                        {
+                            name: 'Inviter',
+                            value: usedInvite.inviterTag ? `${usedInvite.inviterTag} (${usedInvite.inviterId})` : 'Unknown',
+                            inline: true,
+                        },
+                        { name: 'Uses', value: `${usedInvite.uses}${usedInvite.maxUses ? ` / ${usedInvite.maxUses}` : ''}`, inline: true },
+                    ],
+                });
+
+                await logSender.sendLog({
+                    guildId: member.guild.id,
+                    logType: 'invite',
+                    embed: inviteEmbed,
+                    client: member.client,
+                });
+            }
+        } catch (err) {
+            console.error('Failed to log invite usage:', err);
         }
     },
 };

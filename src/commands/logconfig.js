@@ -1,19 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 const logChannelTypeStore = require('../utils/logChannelTypeStore');
-
-const LOG_CHANNEL_LABELS = {
-  moderation: 'Moderation',
-  security: 'Security',
-  message: 'Message',
-  member: 'Member',
-  role: 'Role',
-  channel: 'Channel',
-  server: 'Server',
-  verification: 'Verification',
-  invite: 'Invite',
-};
-
-const LOG_TYPES = Object.values(logChannelTypeStore.LOG_TYPES);
+const logConfigManager = require('../utils/logConfigManager');
+const { buildLogConfigView } = require('../utils/logConfigView');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -33,82 +21,22 @@ module.exports = {
     await interaction.deferReply({ ephemeral: true });
 
     const guild = interaction.guild;
-    const guildId = interaction.guildId;
-    const categoryName = 'Logs';
-    let logCategory = guild.channels.cache.find(ch =>
-      ch.type === ChannelType.GuildCategory && ch.name.toLowerCase() === categoryName.toLowerCase()
-    );
-
-    if (!logCategory) {
-      logCategory = await guild.channels
-        .create({ name: categoryName, type: ChannelType.GuildCategory })
-        .catch((err) => {
-          console.error('Failed to create log category:', err);
-          return null;
-        });
+    if (!guild) {
+      return interaction.editReply({ content: 'Could not resolve this server. Please try again.' });
     }
-
-    const created = [];
-    const existing = [];
-    const failed = [];
-
-    for (const logType of LOG_TYPES) {
-      const friendly = LOG_CHANNEL_LABELS[logType] ?? logType;
-      let channel = guild.channels.cache.find(ch =>
-        ch.name === `logs-${logType}` && ch.type === ChannelType.GuildText
-      );
-
-      let action = 'linked';
-      if (!channel) {
-        try {
-          channel = await guild.channels.create({
-            name: `logs-${logType}`,
-            type: ChannelType.GuildText,
-            topic: `Logs ${friendly} events.`,
-            parent: logCategory?.id || undefined,
-          });
-          action = 'created';
-          created.push(`<#${channel.id}> \`${friendly}\``);
-        } catch (err) {
-          console.error(`Failed to create channel for ${logType}:`, err);
-          failed.push(friendly);
-          continue;
-        }
-      } else {
-        if (logCategory && channel.parentId !== logCategory.id) {
-          try {
-            await channel.setParent(logCategory.id);
-          } catch (err) {
-            console.error(`Failed to move ${channel.id} into ${logCategory.id}:`, err);
-          }
-        }
-        existing.push(`<#${channel.id}> \`${friendly}\``);
-      }
-
-      try {
-        await logChannelTypeStore.setChannel(guildId, logType, channel.id);
-      } catch (err) {
-        console.error(`Failed to save ${logType} channel id:`, err);
-        failed.push(friendly);
-        continue;
-      }
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle('🛠️ Logging Channels Synced')
-      .setDescription('Each tracked event now has its own dedicated channel, and the bot will remember them for future logs.')
-      .setColor(0x5865f2)
-      .addFields(
-        { name: 'New channels created', value: created.length ? created.join('\n') : 'None' },
-        { name: 'Already existed', value: existing.length ? existing.join('\n') : 'None' },
-        { name: 'Failures', value: failed.length ? failed.join(', ') : 'None' }
-      );
 
     try {
-      const { applyDefaultColour } = require('../utils/guildColourStore');
-      applyDefaultColour(embed, guildId);
-    } catch (_) {}
-
-    await interaction.editReply({ embeds: [embed] });
+      const created = await logConfigManager.ensureAllDefaultChannels(guild);
+      const logTypes = Object.values(logChannelTypeStore.LOG_TYPES);
+      const defaultType = created[0] || logTypes[0];
+      const note = created.length
+        ? `Created default log channel${created.length === 1 ? '' : 's'} for ${created.map(t => logConfigManager.getFriendlyName(t)).join(', ')}.`
+        : 'All logging categories already have a channel configured.';
+      const view = await buildLogConfigView(guild, defaultType, { note });
+      await interaction.editReply({ embeds: [view.embed], components: view.components });
+    } catch (err) {
+      console.error('Failed to build logging configuration view:', err);
+      await interaction.editReply({ content: 'Failed to open the logging configuration. Please try again later.' });
+    }
   },
 };

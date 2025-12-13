@@ -83,12 +83,14 @@ module.exports = {
         }
       }
 
-      try { await modlog.log(interaction, 'Role Created', [
-        { name: 'Role', value: `${role} (${role.id})`, inline: false },
-        { name: 'Color', value: String(color || 'default'), inline: true },
-        { name: 'Hoist', value: String(hoist), inline: true },
-        { name: 'Mentionable', value: String(mentionable), inline: true },
-      ]); } catch (_) {}
+      try { await modlog.log(interaction, 'Role Created', {
+        target: `${role} (${role.id})`,
+        reason: `Color: ${color || 'default'}`,
+        extraFields: [
+          { name: 'Hoist', value: String(hoist), inline: true },
+          { name: 'Mentionable', value: String(mentionable), inline: true },
+        ],
+      }); } catch (_) {}
       return interaction.reply({ content: `Created role ${role.toString()}${position ? ` at position ${role.position}` : ''}.`, ephemeral: true });
     } catch (err) {
       return interaction.reply({ content: `Failed to create role: ${err.message || 'Unknown error'}`, ephemeral: true });

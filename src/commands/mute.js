@@ -101,11 +101,14 @@ module.exports = {
       const auditReason = `By ${interaction.user.tag} (${interaction.user.id}) | ${reason}`.slice(0, 512);
       await memberToMute.timeout(durationMs, auditReason);
       await interaction.editReply({ content: `Muted ${user.tag} for ${durationStr} | Reason: ${reason}` });
-      try { await modlog.log(interaction, 'Member Timed Out', [
-        { name: 'Target', value: `${user.tag} (${user.id})`, inline: false },
-        { name: 'Duration', value: durationStr, inline: true },
-        { name: 'Reason', value: reason, inline: false },
-      ], 0xffcc00); } catch (_) {}
+      try { await modlog.log(interaction, 'Member Timed Out', {
+        target: `${user.tag} (${user.id})`,
+        reason,
+        color: 0xffcc00,
+        extraFields: [
+          { name: 'Duration', value: durationStr, inline: true },
+        ],
+      }); } catch (_) {}
     } catch (err) {
       await interaction.editReply({ content: `Failed to mute: ${err.message || 'Unknown error'}` });
     }
