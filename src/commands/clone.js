@@ -131,7 +131,7 @@ async function fetchStickerBufferByIdOrUrl(idOrUrl, preferredExt) {
         try {
             const res = await fetch(url);
             if (res.ok) {
-                const buf = await res.buffer();
+                const buf = Buffer.from(await res.arrayBuffer());
                 if (buf && buf.length > 0) return { buffer: buf, sourceUrl: url };
             }
         } catch (_) {
@@ -293,7 +293,7 @@ module.exports = {
                 if (fileAttachment?.url) {
                     const res = await fetch(fileAttachment.url);
                     if (!res.ok) throw new Error('Failed to download the attached file');
-                    fileBuffer = await res.buffer();
+                    fileBuffer = Buffer.from(await res.arrayBuffer());
                     sourceUrl = fileAttachment.url;
                 } else if (idOrUrl) {
                     const preferredExt = stickerMetadata ? stickerFormatToExtension(stickerMetadata.format_type) : undefined;

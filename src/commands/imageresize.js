@@ -66,7 +66,7 @@ module.exports = {
         throw new Error(`Proxy response ${response.status}`);
       }
 
-      const buffer = await response.buffer();
+      const buffer = Buffer.from(await response.arrayBuffer());
       if (!buffer || buffer.length === 0) {
         throw new Error('Received empty image buffer');
       }
@@ -86,4 +86,3 @@ module.exports = {
     }
   },
 };
-

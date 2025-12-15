@@ -20,17 +20,29 @@ module.exports = {
       return interaction.reply({ content: 'Use this command in a server.', ephemeral: true });
     }
 
-    // Public response and avoid timeouts
-    await interaction.deferReply();
+    // Avoid timeouts; use ephemeral so the bot's response can't be deleted by the purge.
+    await interaction.deferReply({ ephemeral: true });
+
+    const safeEditOrFollowUp = async (payload) => {
+      try {
+        await interaction.editReply(payload);
+      } catch (err) {
+        // 10008 = Unknown Message (e.g., original reply message deleted)
+        if (err?.code !== 10008) throw err;
+        try { await interaction.followUp({ ...payload, ephemeral: true }); } catch (_) {}
+      }
+    };
 
     const me = interaction.guild.members.me;
     if (!me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
       await logger.logPermissionDenied(interaction, 'purge', 'Bot missing Manage Messages');
-      return interaction.editReply({ content: 'I need the Manage Messages permission.' });
+      await safeEditOrFollowUp({ content: 'I need the Manage Messages permission.' });
+      return;
     }
     if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageMessages)) {
       await logger.logPermissionDenied(interaction, 'purge', 'User missing Manage Messages');
-      return interaction.editReply({ content: 'You need Manage Messages to use this command.' });
+      await safeEditOrFollowUp({ content: 'You need Manage Messages to use this command.' });
+      return;
     }
 
     // Ensure the channel supports bulkDelete
@@ -43,7 +55,8 @@ module.exports = {
       ChannelType.AnnouncementThread,
     ]);
     if (!channel || !allowedTypes.has(channel.type) || typeof channel.bulkDelete !== 'function') {
-      return interaction.editReply({ content: 'This command can only be used in text channels or threads.' });
+      await safeEditOrFollowUp({ content: 'This command can only be used in text channels or threads.' });
+      return;
     }
 
     const amount = interaction.options.getInteger('amount', true);
@@ -53,7 +66,7 @@ module.exports = {
       const deleted = await channel.bulkDelete(amount, true);
       const count = deleted?.size ?? 0;
       const note = count < amount ? ' (some messages may be older than 14 days and cannot be deleted)' : '';
-      await interaction.editReply({ content: `Deleted ${count} message(s)${note}.` });
+      await safeEditOrFollowUp({ content: `Deleted ${count} message(s)${note}.` });
       try { await modlog.log(interaction, 'Messages Purged', {
         target: `<#${channel.id}> (${channel.id})`,
         reason: `Requested ${amount} | Deleted ${count}`,
@@ -64,7 +77,7 @@ module.exports = {
         ],
       }); } catch (_) {}
     } catch (err) {
-      await interaction.editReply({ content: `Failed to purge: ${err.message || 'Unknown error'}` });
+      await safeEditOrFollowUp({ content: `Failed to purge: ${err?.message || 'Unknown error'}` });
     }
   },
 };

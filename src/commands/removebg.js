@@ -96,7 +96,7 @@ module.exports = {
                 throw new Error(msg);
             }
 
-            const buffer = await response.buffer();
+            const buffer = Buffer.from(await response.arrayBuffer());
             const attachment = new AttachmentBuilder(buffer, { name: 'no-bg.png' });
 
             try {

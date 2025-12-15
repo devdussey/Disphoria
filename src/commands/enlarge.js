@@ -118,7 +118,7 @@ async function fetchStickerBufferByIdOrUrl(idOrUrl) {
     try {
       const res = await fetch(url);
       if (res.ok) {
-        const buf = await res.buffer();
+        const buf = Buffer.from(await res.arrayBuffer());
         if (buf && buf.length > 0) return { buffer: buf, sourceUrl: url };
       }
     } catch (_) {
@@ -206,7 +206,7 @@ module.exports = {
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error('Download failed');
-        const buf = await res.buffer();
+        const buf = Buffer.from(await res.arrayBuffer());
         const attachment = new AttachmentBuilder(buf, { name: fileName });
         if (acknowledged) return interaction.editReply({ content: 'Here is the enlarged emoji.', files: [attachment] });
         if (channelMsg) return channelMsg.edit({ content: 'Here is the enlarged emoji.', files: [attachment] });
@@ -229,7 +229,7 @@ module.exports = {
         if (file?.url) {
           const res = await fetch(file.url);
           if (!res.ok) throw new Error('Download failed');
-          buffer = await res.buffer();
+          buffer = Buffer.from(await res.arrayBuffer());
           urlUsed = file.url;
         } else if (idOrUrl) {
           const result = await fetchStickerBufferByIdOrUrl(idOrUrl);
