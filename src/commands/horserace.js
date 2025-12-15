@@ -545,12 +545,14 @@ module.exports = {
       }
     }
 
+    const playerStatsByUserId = new Map();
     const playerSummaryLines = [];
     for (const horse of horses) {
       if (!horse.isPlayer || !horse.userId) continue;
       const placementIndex = finishOrder.indexOf(horse);
       const placementNumber = placementIndex === -1 ? null : placementIndex + 1;
       const stats = recordRace(guildId, horse.userId, placementNumber);
+      playerStatsByUserId.set(horse.userId, stats);
       const placementLabel = placementNumber
         ? PLACE_EMOJIS[placementIndex] ?? `#${placementNumber}`
         : '#?';
@@ -599,6 +601,30 @@ module.exports = {
     finalSummary = summarySections.join('\n');
 
     await buildAndSend();
+
+    try {
+      const matchRankLines = finishOrder.map((horse, idx) => {
+        const place = idx + 1;
+        const medal = PLACE_EMOJIS[idx] ?? `#${place}`;
+        const nameRaw = horse.shortName || horse.name || `Horse ${place}`;
+        const name = horse.isPlayer ? `**${escapeMarkdown(nameRaw)}**` : escapeMarkdown(nameRaw);
+        if (!horse.isPlayer || !horse.userId) {
+          return `${medal} ${name} — NPC`;
+        }
+        const stats = playerStatsByUserId.get(horse.userId);
+        const recordText = stats
+          ? `🥇 ${stats.first ?? 0} | 🥈 ${stats.second ?? 0} | 🥉 ${stats.third ?? 0} (Races: ${stats.races ?? 0})`
+          : 'No record yet';
+        return `${medal} ${name} — ${recordText}`;
+      });
+
+      await interaction.followUp({
+        content: `**🏁 Match ranks & records**\n${matchRankLines.map(line => `• ${line}`).join('\n')}`,
+        allowedMentions: { parse: [] },
+      });
+    } catch (err) {
+      console.error('Failed to send horserace ranks/records message:', err);
+    }
     collector.stop('finished');
   },
 };
