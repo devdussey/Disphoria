@@ -1,51 +1,92 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder, ChannelType } = require('discord.js');
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  ChannelType,
+} = require('discord.js');
+
 const logChannelTypeStore = require('./logChannelTypeStore');
-const { LOG_CHANNEL_LABELS } = require('./logConfigManager');
 const { applyDefaultColour } = require('./guildColourStore');
+const {
+  listCategories,
+  listKeysForCategory,
+  getLogKeyCategory,
+  getLogKeyLabel,
+} = require('./logEvents');
+const { isMysqlConfigured } = require('./mysqlPool');
 
 const DEFAULT_COLOR = 0x5865f2;
+const PAGE_SIZE = 25;
 
-async function buildLogConfigView(guild, selectedType, options = {}) {
+function getEntry(entries, key) {
+  return entries?.[key] || { channelId: null, enabled: true };
+}
+
+function formatEntry(entry) {
+  const status = entry.enabled ? 'Enabled ✅' : 'Disabled ❌';
+  const channelDisplay = entry.channelId ? `<#${entry.channelId}>` : '*No channel configured*';
+  return `${status}\nChannel: ${channelDisplay}`;
+}
+
+function clampPage(page, totalPages) {
+  const raw = Number(page);
+  if (!Number.isFinite(raw) || raw < 0) return 0;
+  if (totalPages <= 0) return 0;
+  return Math.min(raw, totalPages - 1);
+}
+
+async function buildLogConfigView(guild, selectedKey, options = {}) {
   const guildId = guild?.id;
-  const logTypes = Object.values(logChannelTypeStore.LOG_TYPES);
+  const categories = listCategories();
+
+  const fallbackCategory = categories[0] || 'Other';
+  const activeCategory = categories.includes(options.category) ? options.category : (
+    selectedKey ? getLogKeyCategory(selectedKey) : fallbackCategory
+  );
+
+  const keysInCategory = listKeysForCategory(activeCategory);
+  const selected = (selectedKey && keysInCategory.includes(selectedKey)) ? selectedKey : (keysInCategory[0] || null);
+
+  const totalPages = Math.max(1, Math.ceil(keysInCategory.length / PAGE_SIZE));
+  const selectedIndex = selected ? keysInCategory.indexOf(selected) : 0;
+  const derivedPage = selected ? Math.floor(Math.max(0, selectedIndex) / PAGE_SIZE) : 0;
+  const page = clampPage(typeof options.page !== 'undefined' ? options.page : derivedPage, totalPages);
+  const pageKeys = keysInCategory.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   const entries = guildId ? await logChannelTypeStore.getAll(guildId) : {};
+  const selectedEntry = selected ? getEntry(entries, selected) : null;
 
-  const validTypes = logTypes.filter(Boolean);
-  let activeType = selectedType && validTypes.includes(selectedType) ? selectedType : validTypes[0];
-  if (!activeType && validTypes.length) activeType = validTypes[0];
-
-  const selectedEntry = activeType ? entries[activeType] : null;
-  const friendlySelected = activeType ? (LOG_CHANNEL_LABELS[activeType] || activeType) : 'None';
-
-  const descriptionParts = ['Use the dropdown below to pick a category, toggle it, and assign a channel.'];
+  const descriptionParts = [
+    'Pick a log event, toggle it, and assign a channel. Changes apply immediately.',
+    `Storage: **${isMysqlConfigured() ? 'MySQL' : 'Local JSON'}**`,
+  ];
   if (options.note) descriptionParts.push(options.note);
 
   const embed = new EmbedBuilder()
-    .setTitle('Logging configuration')
-    .setDescription(descriptionParts.join('\n\n'))
+    .setTitle('Log configuration')
+    .setDescription(descriptionParts.join('\n'))
     .setColor(DEFAULT_COLOR)
     .setTimestamp(new Date());
 
-  const fields = validTypes.map(type => {
-    const entry = entries[type] || { channelId: null, enabled: true };
-    const friendly = LOG_CHANNEL_LABELS[type] || type;
-    const status = entry.enabled ? 'Enabled ✅' : 'Disabled ❌';
-    const channelDisplay = entry.channelId ? `<#${entry.channelId}>` : '*No channel configured*';
-    return {
-      name: `${friendly}`,
-      value: `${status}\nChannel: ${channelDisplay}`,
-      inline: true,
-    };
-  });
+  if (pageKeys.length) {
+    embed.addFields(
+      pageKeys.map(key => ({
+        name: `${getLogKeyLabel(key)}${key === selected ? ' (selected)' : ''}`,
+        value: formatEntry(getEntry(entries, key)),
+        inline: true,
+      }))
+    );
+  } else {
+    embed.addFields({ name: 'No events in this category', value: 'Add at least one log key to configure.' });
+  }
 
-  if (fields.length) embed.addFields(fields);
-
-  if (activeType) {
-    const statusText = selectedEntry?.enabled ? 'Enabled ✅' : 'Disabled ❌';
-    const channelText = selectedEntry?.channelId ? `<#${selectedEntry.channelId}>` : 'None';
+  if (selected && selectedEntry) {
     embed.addFields({
-      name: `Selected: ${friendlySelected}`,
-      value: `Status: ${statusText}\nChannel: ${channelText}`,
+      name: `Selected: ${getLogKeyLabel(selected)}`,
+      value: formatEntry(selectedEntry),
       inline: false,
     });
   }
@@ -54,50 +95,76 @@ async function buildLogConfigView(guild, selectedType, options = {}) {
     applyDefaultColour(embed, guildId);
   } catch (_) {}
 
-  const selectMenu = new ActionRowBuilder().addComponents(
+  const categorySelectRow = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('logconfig:category')
-      .setPlaceholder('Select category to configure')
-      .addOptions(validTypes.map(type => {
-        const entry = entries[type] || { channelId: null, enabled: true };
-        const friendly = LOG_CHANNEL_LABELS[type] || type;
-        return {
-          label: friendly,
-          value: type,
-          description: entry.enabled ? 'Enabled' : 'Disabled',
-          default: type === activeType,
-        };
-      }))
+      .setPlaceholder('Filter by category')
+      .addOptions(categories.slice(0, 25).map(category => ({
+        label: category,
+        value: category,
+        default: category === activeCategory,
+      })))
+  );
+
+  const eventSelectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`logconfig:event:${activeCategory}:${page}`)
+      .setPlaceholder('Select a log event to configure')
+      .addOptions(pageKeys.slice(0, 25).map(key => ({
+        label: getLogKeyLabel(key).slice(0, 100),
+        value: key,
+        default: key === selected,
+      })))
+      .setDisabled(!pageKeys.length)
+  );
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`logconfig:page:${activeCategory}:${page - 1}:${selected || 'none'}`)
+      .setLabel('Prev')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 0),
+    new ButtonBuilder()
+      .setCustomId(`logconfig:page:${activeCategory}:${page + 1}:${selected || 'none'}`)
+      .setLabel('Next')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page >= totalPages - 1),
   );
 
   const toggleButton = new ButtonBuilder()
-    .setCustomId(`logconfig:toggle:${activeType ?? 'none'}`)
-    .setLabel(activeType ? `${selectedEntry?.enabled ? 'Disable' : 'Enable'} ${friendlySelected}` : 'Select a category')
+    .setCustomId(`logconfig:toggle:${selected ?? 'none'}`)
+    .setLabel(selected ? (selectedEntry?.enabled ? 'Disable' : 'Enable') : 'Select an event')
     .setStyle(selectedEntry?.enabled ? ButtonStyle.Danger : ButtonStyle.Success)
-    .setDisabled(!activeType);
+    .setDisabled(!selected);
 
   const defaultButton = new ButtonBuilder()
-    .setCustomId(`logconfig:default:${activeType ?? 'none'}`)
+    .setCustomId(`logconfig:default:${selected ?? 'none'}`)
     .setLabel('Auto-create default channel')
     .setStyle(ButtonStyle.Primary)
-    .setDisabled(!activeType);
+    .setDisabled(!selected);
 
   const buttonRow = new ActionRowBuilder().addComponents(toggleButton, defaultButton);
 
   const channelSelect = new ChannelSelectMenuBuilder()
-    .setCustomId(`logconfig:setchannel:${activeType ?? 'none'}`)
-    .setPlaceholder(activeType ? `Choose channel for ${friendlySelected}` : 'Select a category first')
-    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum)
+    .setCustomId(`logconfig:setchannel:${selected ?? 'none'}`)
+    .setPlaceholder(selected ? `Choose channel for ${getLogKeyLabel(selected)}` : 'Select an event first')
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     .setMinValues(1)
     .setMaxValues(1)
-    .setDisabled(!activeType);
+    .setDisabled(!selected);
 
   const channelRow = new ActionRowBuilder().addComponents(channelSelect);
 
+  const components = totalPages > 1
+    ? [categorySelectRow, eventSelectRow, navRow, buttonRow, channelRow]
+    : [categorySelectRow, eventSelectRow, buttonRow, channelRow];
+
   return {
     embed,
-    components: [selectMenu, buttonRow, channelRow],
-    selectedType: activeType,
+    components,
+    selectedKey: selected,
+    category: activeCategory,
+    page,
   };
 }
 

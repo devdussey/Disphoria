@@ -24,6 +24,9 @@ module.exports = {
       }
       jlStore.addEvent(guild.id, member.id, 'leave', Date.now(), { reason });
 
+      // Bans are handled by the GuildBanAdd event to avoid duplicates.
+      if (reason === 'ban') return;
+
       // Log the member removal
       const logEmbed = new EmbedBuilder()
         .setTitle(`👋 Member ${reason === 'ban' ? 'Banned' : reason === 'kick' ? 'Kicked' : 'Left'}`)
@@ -37,7 +40,7 @@ module.exports = {
 
       await logSender.sendLog({
         guildId: guild.id,
-        logType: 'member',
+        logType: reason === 'kick' ? 'member_kick' : 'member_leave',
         embed: logEmbed,
         client,
       });
@@ -70,4 +73,3 @@ module.exports = {
     }
   },
 };
-

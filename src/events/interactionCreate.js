@@ -156,8 +156,23 @@ module.exports = {
                     return;
                 }
                 try {
-                    const selectedType = interaction.values?.[0];
-                    const view = await logConfigView.buildLogConfigView(interaction.guild, selectedType);
+                    const selectedCategory = interaction.values?.[0];
+                    const view = await logConfigView.buildLogConfigView(interaction.guild, null, { category: selectedCategory, page: 0 });
+                    await interaction.update({ embeds: [view.embed], components: view.components });
+                } catch (err) {
+                    console.error('Failed to update log configuration view:', err);
+                }
+                return;
+            }
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('logconfig:event:')) {
+                if (!interaction.inGuild()) return;
+                if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageGuild)) {
+                    try { await interaction.reply({ content: 'Manage Server permission is required to configure logs.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                try {
+                    const selectedKey = interaction.values?.[0];
+                    const view = await logConfigView.buildLogConfigView(interaction.guild, selectedKey);
                     await interaction.update({ embeds: [view.embed], components: view.components });
                 } catch (err) {
                     console.error('Failed to update log configuration view:', err);
@@ -238,7 +253,14 @@ module.exports = {
                 let followUpContent = null;
                 let handledError = false;
                 try {
-                    if (action === 'toggle') {
+                    if (action === 'page') {
+                        const [, , category, pageRaw, selectedRaw] = interaction.customId.split(':');
+                        const page = Number(pageRaw);
+                        const selectedKey = selectedRaw && selectedRaw !== 'none' ? selectedRaw : null;
+                        const view = await logConfigView.buildLogConfigView(interaction.guild, selectedKey, { category, page });
+                        await interaction.update({ embeds: [view.embed], components: view.components });
+                        return;
+                    } else if (action === 'toggle') {
                         const entry = await logChannelTypeStore.getEntry(interaction.guildId, logType);
                         if (entry) {
                             await logChannelTypeStore.setEnabled(interaction.guildId, logType, !entry.enabled);

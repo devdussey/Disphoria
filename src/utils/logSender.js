@@ -1,12 +1,13 @@
-// Unified log sender that routes logs to appropriate channels based on type
+// Unified log sender that routes logs to appropriate channels based on key
 const logChannelTypeStore = require('./logChannelTypeStore');
+const { getFallbackKey } = require('./logEvents');
 const { parseOwnerIds } = require('./ownerIds');
 
 /**
  * Send a log message to the appropriate channel(s)
  * @param {Object} options - Log options
  * @param {string} options.guildId - Guild ID
- * @param {string} options.logType - Log type (moderation, security, message, member, role, channel, server, verification, invite)
+ * @param {string} options.logType - Log routing key (e.g. message_delete, member_ban, channel_update)
  * @param {Object} options.embed - Discord embed or array of embeds to send
  * @param {Object} options.client - Discord client (for owner DM fallback)
  * @param {boolean} options.ownerFallback - Whether to DM owners if channel fails (default: false)
@@ -28,12 +29,20 @@ async function sendLog(options) {
 
   let sentSuccessfully = false;
 
-  // Check whether this log type is enabled before attempting to send
-  const entry = guildId ? await logChannelTypeStore.getEntry(guildId, logType) : null;
-  if (entry && entry.enabled === false) {
-    return false;
+  // Check whether this log key is enabled before attempting to send.
+  // If no channel is configured for the specific key, fall back to its group key (if defined).
+  const directEntry = guildId ? await logChannelTypeStore.getEntry(guildId, logType) : null;
+  if (directEntry && directEntry.enabled === false) return false;
+
+  let channelId = directEntry?.channelId || null;
+  if (!channelId) {
+    const fallbackKey = getFallbackKey(logType);
+    if (fallbackKey) {
+      const fallbackEntry = await logChannelTypeStore.getEntry(guildId, fallbackKey);
+      if (fallbackEntry && fallbackEntry.enabled === false) return false;
+      channelId = fallbackEntry?.channelId || null;
+    }
   }
-  const channelId = entry?.channelId;
 
   // Try to send to the configured channel for this log type
   try {

@@ -33,7 +33,7 @@ module.exports = {
       });
       await logSender.sendLog({
         guildId: guild.id,
-        logType: 'message',
+        logType: 'message_delete',
         embed,
         client: message.client,
         ownerFallback: true,

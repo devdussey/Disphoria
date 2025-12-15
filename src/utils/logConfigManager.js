@@ -1,34 +1,13 @@
 const { ChannelType, PermissionsBitField } = require('discord.js');
-const logChannelTypeStore = require('./logChannelTypeStore');
+const { getLogKeyLabel, isValidLogKey } = require('./logEvents');
 
 const LOG_CATEGORY_NAME = 'Logs';
-const LOG_CHANNEL_LABELS = {
-  moderation: 'Moderation',
-  security: 'Security',
-  message: 'Message',
-  member: 'Member',
-  role: 'Role',
-  channel: 'Channel',
-  server: 'Server',
-  verification: 'Verification',
-  invite: 'Invite',
-  voice: 'Voice',
-  emoji: 'Emoji & Stickers',
-  integration: 'Integrations & Webhooks',
-  automod: 'AutoMod',
-  command: 'Commands',
-  system: 'System',
-};
-
-const VALID_LOG_TYPES = Object.values(logChannelTypeStore.LOG_TYPES);
-
 function isValidLogType(logType) {
-  return VALID_LOG_TYPES.includes(logType);
+  return isValidLogKey(logType);
 }
 
 function getFriendlyName(logType) {
-  if (typeof logType !== 'string') return logType;
-  return LOG_CHANNEL_LABELS[logType] ?? logType;
+  return getLogKeyLabel(logType);
 }
 
 async function ensureLogCategory(guild) {
@@ -55,7 +34,8 @@ async function ensureLogCategory(guild) {
 
 async function ensureDefaultChannelForType(guild, logType) {
   if (!guild || !isValidLogType(logType)) return null;
-  const channelName = `logs-${logType}`;
+  const safeName = String(logType).toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const channelName = `logs-${safeName}`.slice(0, 96);
   const friendly = getFriendlyName(logType);
 
   const existing = guild.channels.cache.find(ch =>
@@ -82,37 +62,9 @@ async function ensureDefaultChannelForType(guild, logType) {
   }
 }
 
-async function ensureAllDefaultChannels(guild) {
-  const created = [];
-  if (!guild) return created;
-  const guildId = guild.id;
-  if (!guildId) return created;
-
-  for (const logType of VALID_LOG_TYPES) {
-    const entry = await logChannelTypeStore.getEntry(guildId, logType);
-    let needsCreation = !entry?.channelId;
-    if (!needsCreation && entry.channelId) {
-      const existing = await guild.channels.fetch(entry.channelId).catch(() => null);
-      if (!existing) needsCreation = true;
-    }
-
-    if (!needsCreation) continue;
-
-    const channel = await ensureDefaultChannelForType(guild, logType);
-    if (!channel) continue;
-
-    await logChannelTypeStore.setChannel(guildId, logType, channel.id);
-    created.push(logType);
-  }
-
-  return created;
-}
-
 module.exports = {
   LOG_CATEGORY_NAME,
-  LOG_CHANNEL_LABELS,
   ensureLogCategory,
   ensureDefaultChannelForType,
-  ensureAllDefaultChannels,
   getFriendlyName,
 };

@@ -32,7 +32,7 @@ module.exports = {
 
                     await logSender.sendLog({
                         guildId: member.guild.id,
-                        logType: 'member',
+                        logType: 'security',
                         embed,
                         client: member.client,
                     });
@@ -106,7 +106,7 @@ module.exports = {
 
             await logSender.sendLog({
                 guildId: member.guild.id,
-                logType: 'member',
+                logType: 'member_join',
                 embed,
                 client: member.client,
             });
@@ -137,7 +137,7 @@ module.exports = {
 
                 await logSender.sendLog({
                     guildId: member.guild.id,
-                    logType: 'invite',
+                    logType: 'invite_used',
                     embed: inviteEmbed,
                     client: member.client,
                 });

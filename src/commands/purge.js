@@ -70,6 +70,7 @@ module.exports = {
       try { await modlog.log(interaction, 'Messages Purged', {
         target: `<#${channel.id}> (${channel.id})`,
         reason: `Requested ${amount} | Deleted ${count}`,
+        logKey: 'messages_purged',
         color: 0x2f3136,
         extraFields: [
           { name: 'Requested', value: String(amount), inline: true },

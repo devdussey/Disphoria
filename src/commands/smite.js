@@ -167,16 +167,19 @@ module.exports = {
       await interaction.editReply({ content: parts.join(' ') });
 
       try {
-        const fields = [
-          { name: 'Target', value: `${targetUser.tag} (${targetUser.id})`, inline: false },
+        const extraFields = [
           { name: 'Duration', value: `${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`, inline: true },
-          { name: 'Reason', value: humanReason, inline: false },
           { name: 'Remaining Smites', value: String(remainingBags), inline: true },
         ];
         if (coinsSpent && smiteCost > 0) {
-          fields.push({ name: 'Coins Spent', value: `${formatCoins(smiteCost)} coin${smiteCost === 1 ? '' : 's'}`, inline: true });
+          extraFields.push({ name: 'Coins Spent', value: `${formatCoins(smiteCost)} coin${smiteCost === 1 ? '' : 's'}`, inline: true });
         }
-        await modLogger.log(interaction, 'Smite Timeout', fields, 0x2ecc71);
+        await modLogger.log(interaction, 'Smite Timeout', {
+          target: `${targetUser.tag} (${targetUser.id})`,
+          reason: humanReason,
+          color: 0x2ecc71,
+          extraFields,
+        });
       } catch (_) {}
     } catch (err) {
       await tokenStore.addTokens(guildId, userId, 1);

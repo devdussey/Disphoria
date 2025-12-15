@@ -85,12 +85,12 @@ function buildInviteEmbed(action, guild, details, color) {
 
 async function handleRoleCreate(role) {
   const embed = buildRoleEmbed('Role Created', role, 0x57f287);
-  await safeLog(role.guild, 'role', embed);
+  await safeLog(role.guild, 'role_create', embed);
 }
 
 async function handleRoleDelete(role) {
   const embed = buildRoleEmbed('Role Deleted', role, 0xed4245);
-  await safeLog(role.guild, 'role', embed);
+  await safeLog(role.guild, 'role_delete', embed);
 }
 
 async function handleRoleUpdate(oldRole, newRole) {
@@ -111,17 +111,17 @@ async function handleRoleUpdate(oldRole, newRole) {
     ],
     thumbnailTarget: newRole,
   });
-  await safeLog(newRole.guild, 'role', embed);
+  await safeLog(newRole.guild, 'role_update', embed);
 }
 
 async function handleChannelCreate(channel) {
   const embed = buildChannelEmbed('Channel Created', channel, 0x57f287);
-  await safeLog(channel.guild, 'channel', embed);
+  await safeLog(channel.guild, 'channel_create', embed);
 }
 
 async function handleChannelDelete(channel) {
   const embed = buildChannelEmbed('Channel Deleted', channel, 0xed4245);
-  await safeLog(channel.guild, 'channel', embed);
+  await safeLog(channel.guild, 'channel_delete', embed);
 }
 
 async function handleChannelUpdate(oldChannel, newChannel) {
@@ -132,7 +132,7 @@ async function handleChannelUpdate(oldChannel, newChannel) {
   if (oldChannel.nsfw !== newChannel.nsfw) changes.push(newChannel.nsfw ? 'NSFW enabled' : 'NSFW disabled');
   if (!changes.length) return;
   const embed = buildChannelEmbed('Channel Updated', newChannel, 0xf39c12, changes.join('\n'));
-  await safeLog(newChannel.guild, 'channel', embed);
+  await safeLog(newChannel.guild, 'channel_update', embed);
 }
 
 async function handleThreadCreate(thread) {
@@ -334,7 +334,7 @@ async function handleInviteCreate(invite) {
     uses: invite.uses ?? 0,
     reason: 'Invite generated',
   }, 0x57f287);
-  await safeLog(guild, 'invite', embed);
+  await safeLog(guild, 'invite_create', embed);
 }
 
 async function handleInviteDelete(invite) {
@@ -348,7 +348,7 @@ async function handleInviteDelete(invite) {
     uses: invite.uses ?? 0,
     reason: 'Invite removed',
   }, 0xed4245);
-  await safeLog(guild, 'invite', embed);
+  await safeLog(guild, 'invite_delete', embed);
 }
 
 async function handleAutoModRule(action, rule) {

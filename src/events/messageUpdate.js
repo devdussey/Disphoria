@@ -25,7 +25,7 @@ module.exports = {
       });
       await logSender.sendLog({
         guildId: newMessage.guild.id,
-        logType: 'message',
+        logType: 'message_edit',
         embed,
         client: newMessage.client,
       });

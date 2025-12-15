@@ -1,12 +1,10 @@
 const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
-const logChannelTypeStore = require('../utils/logChannelTypeStore');
-const logConfigManager = require('../utils/logConfigManager');
 const { buildLogConfigView } = require('../utils/logConfigView');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('logconfig')
-    .setDescription('Ensure each tracked event has its own log channel'),
+    .setDescription('Configure where each log event is sent'),
 
   async execute(interaction) {
     if (!interaction.inGuild()) {
@@ -26,13 +24,10 @@ module.exports = {
     }
 
     try {
-      const created = await logConfigManager.ensureAllDefaultChannels(guild);
-      const logTypes = Object.values(logChannelTypeStore.LOG_TYPES);
-      const defaultType = created[0] || logTypes[0];
-      const note = created.length
-        ? `Created default log channel${created.length === 1 ? '' : 's'} for ${created.map(t => logConfigManager.getFriendlyName(t)).join(', ')}.`
-        : 'All logging categories already have a channel configured.';
-      const view = await buildLogConfigView(guild, defaultType, { note });
+      const view = await buildLogConfigView(guild, null, {
+        category: 'Message',
+        note: 'Tip: set broad “All … Events” routes first, then override specific events.',
+      });
       await interaction.editReply({ embeds: [view.embed], components: view.components });
     } catch (err) {
       console.error('Failed to build logging configuration view:', err);

@@ -3,7 +3,7 @@ const { resolveEmbedColour } = require('./guildColourStore');
 const logSender = require('./logSender');
 const { buildLogEmbed } = require('./logEmbedFactory');
 
-async function send(interaction, embed) {
+async function send(interaction, embed, logKey = 'moderation') {
   const guild = interaction.guild;
   const client = interaction.client;
   if (!guild) return false;
@@ -14,7 +14,7 @@ async function send(interaction, embed) {
   // Try new unified log sender first (uses logChannelTypeStore)
   const sent = await logSender.sendLog({
     guildId: guild.id,
-    logType: 'moderation',
+    logType: logKey || 'moderation',
     embed,
     client,
     ownerFallback: ownerFallbackOnChannelFail,
@@ -66,7 +66,7 @@ function buildMarkerFields(interaction) {
 }
 
 async function log(interaction, title, options = {}) {
-  const { reason, target, extraFields = [], color } = options;
+  const { reason, target, extraFields = [], color, logKey } = options;
   const resolvedColor = resolveEmbedColour(interaction.guildId, color ?? 0x5865f2);
   const equipFields = [...buildMarkerFields(interaction), ...(Array.isArray(extraFields) ? extraFields : [])];
   const embed = buildLogEmbed({
@@ -77,7 +77,7 @@ async function log(interaction, title, options = {}) {
     color: resolvedColor,
     extraFields: equipFields,
   });
-  await send(interaction, embed);
+  await send(interaction, embed, logKey || 'moderation');
 }
 
 module.exports = { log };
