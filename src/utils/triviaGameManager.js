@@ -4,7 +4,9 @@ const triviaData = require('./triviaData');
 const triviaStatsStore = require('./triviaStatsStore');
 const { resolveEmbedColour } = require('./guildColourStore');
 
-const ROUND_DURATION_MS = 6_000;
+const DEFAULT_ROUND_SECONDS = 6;
+const MIN_ROUND_SECONDS = 3;
+const MAX_ROUND_SECONDS = 60;
 const DEFAULT_QUESTION_COUNT = 10;
 const BETWEEN_QUESTION_DELAY_MS = 1_500;
 
@@ -234,7 +236,7 @@ async function askQuestion(game, question, index) {
   const responses = new Map();
 
   const collector = game.channel.createMessageCollector({
-    time: ROUND_DURATION_MS,
+    time: game.roundDurationMs,
     filter: message => {
       if (message.author.bot) return false;
       if (message.channelId !== game.channelId) return false;
@@ -326,9 +328,10 @@ async function runTriviaGame(game) {
     `Category: **${game.categoryName}**`,
     `Difficulty: **${game.difficultyLabel}**`,
     `Questions: ${game.questionCount}`,
+    `Round timer: ${game.roundSeconds}s`,
     `Host: <@${game.hostId}>`,
     '',
-    'Answer with **A**, **B**, **C**, or **D** within 6 seconds to earn points.',
+    `Answer with **A**, **B**, **C**, or **D** within ${game.roundSeconds} seconds to earn points.`,
   ];
 
   await game.channel.send({ content: introLines.join('\n') }).catch(() => {});
@@ -354,7 +357,7 @@ async function runTriviaGame(game) {
 }
 
 async function startTriviaGame(interaction, options) {
-  const { categoryId, difficulty, questionCount } = options || {};
+  const { categoryId, difficulty, questionCount, roundSeconds } = options || {};
   const difficultyKey = triviaData.normaliseDifficultyKey(difficulty);
   if (!difficultyKey) {
     return { ok: false, error: 'Invalid difficulty selected.' };
@@ -376,6 +379,10 @@ async function startTriviaGame(interaction, options) {
   if (!questions.length) {
     return { ok: false, error: 'Failed to build the question list for this game.' };
   }
+
+  const requestedRoundSeconds = Number.isInteger(roundSeconds) ? roundSeconds : DEFAULT_ROUND_SECONDS;
+  const actualRoundSeconds = Math.max(MIN_ROUND_SECONDS, Math.min(MAX_ROUND_SECONDS, requestedRoundSeconds));
+  const roundDurationMs = actualRoundSeconds * 1000;
 
   const key = getKey(interaction.guildId, interaction.channelId);
   if (activeGames.has(key)) {
@@ -403,6 +410,8 @@ async function startTriviaGame(interaction, options) {
     difficultyLabel: triviaData.formatDifficultyName(difficultyKey),
     questionCount: questions.length,
     questions,
+    roundSeconds: actualRoundSeconds,
+    roundDurationMs,
     players: new Map(),
     roundsPlayed: 0,
     isStopped: false,

@@ -40,6 +40,13 @@ module.exports = {
         .setDescription('How many questions to ask (default 10)')
         .setMinValue(1)
         .setMaxValue(25),
+    )
+    .addIntegerOption(option =>
+      option
+        .setName('round_seconds')
+        .setDescription('Seconds allowed to answer each question (default 6)')
+        .setMinValue(3)
+        .setMaxValue(60),
     ),
 
   async execute(interaction) {
@@ -63,6 +70,7 @@ module.exports = {
     const rawCategoryId = interaction.options.getString('category', true);
     const difficultyInput = interaction.options.getString('difficulty', true);
     const requestedQuestions = interaction.options.getInteger('questions');
+    const roundSeconds = interaction.options.getInteger('round_seconds');
 
     const normalisedDifficulty = triviaData.normaliseDifficultyKey(difficultyInput);
     if (!normalisedDifficulty) {
@@ -89,13 +97,15 @@ module.exports = {
       categoryId: category.id,
       difficulty: normalisedDifficulty,
       questionCount: desiredCount,
+      roundSeconds,
     });
 
     if (!result.ok) {
       return interaction.reply({ content: result.error || 'Unable to start trivia right now.', ephemeral: true });
     }
 
-    const acknowledgement = `Starting **${category.name}** trivia (${triviaData.formatDifficultyName(normalisedDifficulty)}) with ${result.questionCount} question${result.questionCount === 1 ? '' : 's'} in ${channel}. Good luck!`;
+    const timerSeconds = result.game?.roundSeconds ?? 6;
+    const acknowledgement = `Starting **${category.name}** trivia (${triviaData.formatDifficultyName(normalisedDifficulty)}) with ${result.questionCount} question${result.questionCount === 1 ? '' : 's'} in ${channel}. Timer: ${timerSeconds}s per question. Good luck!`;
 
     return interaction.reply({ content: acknowledgement, ephemeral: true });
   },
