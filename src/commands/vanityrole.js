@@ -15,13 +15,31 @@ function normalizeHex6(input) {
   return `#${hex.toUpperCase()}`;
 }
 
-function pickActiveColour(rec, which) {
+function pickActiveColors(rec, which) {
   const active = which || rec?.active || 'primary';
-  const value = active === 'secondary' ? rec?.secondary : rec?.primary;
-  return { active, value: typeof value === 'string' ? value : null };
+  const main = active === 'secondary' ? rec?.secondary : rec?.primary;
+  const other = active === 'secondary' ? rec?.primary : rec?.secondary;
+
+  if (typeof main === 'string') {
+    return {
+      active,
+      primaryColor: main,
+      secondaryColor: typeof other === 'string' ? other : null,
+    };
+  }
+
+  if (typeof other === 'string') {
+    return {
+      active: 'primary',
+      primaryColor: other,
+      secondaryColor: null,
+    };
+  }
+
+  return { active, primaryColor: null, secondaryColor: null };
 }
 
-async function getOrCreateVanityRole({ interaction, member, me, rec, name, colour }) {
+async function getOrCreateVanityRole({ interaction, member, me, rec, name, colors }) {
   const reason = `Vanity role for ${interaction.user.tag} (${interaction.user.id}) via /vanityrole`;
 
   let role = null;
@@ -43,9 +61,13 @@ async function getOrCreateVanityRole({ interaction, member, me, rec, name, colou
   }
 
   const roleName = (name || `${member.displayName}'s Vanity`).slice(0, 100);
+  const roleColors = colors?.primaryColor ? {
+    primaryColor: colors.primaryColor,
+    secondaryColor: colors.secondaryColor ?? null,
+  } : undefined;
   const createdRole = await interaction.guild.roles.create({
     name: roleName,
-    color: colour ?? undefined,
+    colors: roleColors,
     reason,
   });
 
@@ -93,17 +115,17 @@ module.exports = {
         )
         .addStringOption(opt =>
           opt.setName('primary')
-            .setDescription('Primary hex colour (e.g., #5865F2 or 5865F2)')
+            .setDescription('Primary hex colour (used for gradient)')
             .setRequired(false)
         )
         .addStringOption(opt =>
           opt.setName('secondary')
-            .setDescription('Secondary hex colour (optional)')
+            .setDescription('Secondary hex colour (enables gradient)')
             .setRequired(false)
         )
         .addStringOption(opt =>
           opt.setName('use')
-            .setDescription('Which saved colour to apply now')
+            .setDescription('Flip which colour is primary in the gradient')
             .addChoices(
               { name: 'primary', value: 'primary' },
               { name: 'secondary', value: 'secondary' },
@@ -114,10 +136,10 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('colour')
-        .setDescription('Switch your vanity role colour between your two saved hex codes')
+        .setDescription('Apply your saved colours (solid or gradient)')
         .addStringOption(opt =>
           opt.setName('use')
-            .setDescription('Which colour to apply')
+            .setDescription('Flip which colour is primary in the gradient')
             .addChoices(
               { name: 'primary', value: 'primary' },
               { name: 'secondary', value: 'secondary' },
@@ -173,21 +195,30 @@ module.exports = {
           active: (use === 'secondary' ? 'secondary' : use === 'primary' ? 'primary' : rec?.active) || 'primary',
         };
 
-        const picked = pickActiveColour(merged, merged.active);
+        if (merged.active === 'secondary' && !merged.secondary) {
+          return interaction.editReply({ content: 'No secondary colour saved yet. Set it with `/vanityrole setup secondary:#...`.' });
+        }
+
+        const picked = pickActiveColors(merged, merged.active);
         const { role, created, reason } = await getOrCreateVanityRole({
           interaction,
           member,
           me,
           rec: merged,
           name,
-          colour: picked.value,
+          colors: picked,
         });
 
         if (name) {
           try { await role.setName(name.slice(0, 100), reason); } catch (_) {}
         }
-        if (picked.value) {
-          try { await role.setColor(picked.value, reason); } catch (_) {}
+        if (picked.primaryColor) {
+          try {
+            await role.setColors({
+              primaryColor: picked.primaryColor,
+              secondaryColor: picked.secondaryColor ?? null,
+            }, reason);
+          } catch (_) {}
         }
 
         // Ensure assignment
@@ -213,7 +244,7 @@ module.exports = {
             { name: 'Role', value: `${role} (${role.id})`, inline: false },
             { name: 'Primary', value: saved.primary || 'not set', inline: true },
             { name: 'Secondary', value: saved.secondary || 'not set', inline: true },
-            { name: 'Active', value: saved.active, inline: true },
+            { name: 'Gradient Primary', value: saved.active, inline: true },
             { name: 'Position', value: `${role.position} (desired ${pos.desired})`, inline: true },
           ],
         }); } catch (_) {}
@@ -235,13 +266,19 @@ module.exports = {
         if (me.roles.highest.comparePositionTo(role) <= 0) return interaction.editReply({ content: 'My highest role must be above your vanity role.' });
 
         const use = interaction.options.getString('use', true);
-        const picked = pickActiveColour(rec, use);
-        if (!picked.value) {
-          return interaction.editReply({ content: `No ${picked.active} colour saved yet. Set it with \`/vanityrole setup\`.` });
+        if (use === 'secondary' && !rec?.secondary) {
+          return interaction.editReply({ content: 'No secondary colour saved yet. Set it with `/vanityrole setup`.' });
+        }
+        const picked = pickActiveColors(rec, use);
+        if (!picked.primaryColor) {
+          return interaction.editReply({ content: 'No colours saved yet. Set them with `/vanityrole setup`.' });
         }
 
         const reason = `Vanity role colour change for ${interaction.user.tag} (${interaction.user.id}) via /vanityrole`;
-        await role.setColor(picked.value, reason);
+        await role.setColors({
+          primaryColor: picked.primaryColor,
+          secondaryColor: picked.secondaryColor ?? null,
+        }, reason);
         await upsertUserRecord(interaction.guildId, interaction.user.id, { active: picked.active });
 
         try { await modlog.log(interaction, 'Vanity Role Colour Changed', {
@@ -249,11 +286,14 @@ module.exports = {
           reason: `Set to ${picked.active}`,
           extraFields: [
             { name: 'Role', value: `${role} (${role.id})`, inline: false },
-            { name: 'Colour', value: picked.value, inline: true },
+            { name: 'Primary', value: picked.primaryColor, inline: true },
+            { name: 'Secondary', value: picked.secondaryColor || '(none)', inline: true },
           ],
         }); } catch (_) {}
 
-        return interaction.editReply({ content: `Updated ${role} colour to ${picked.value} (${picked.active}).` });
+        return interaction.editReply({
+          content: `Updated ${role} colours to ${picked.primaryColor}${picked.secondaryColor ? ` → ${picked.secondaryColor}` : ''}.`,
+        });
       }
 
       if (sub === 'name') {
@@ -285,4 +325,3 @@ module.exports = {
     }
   },
 };
-

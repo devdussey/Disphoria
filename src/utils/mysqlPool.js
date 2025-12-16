@@ -3,8 +3,29 @@ const mysql = require('mysql2/promise');
 let pool = null;
 let tableEnsured = new Set();
 
+function normalizeMysqlUrl(rawUrl) {
+  let url = String(rawUrl || '').trim();
+  if (!url) return '';
+
+  if (
+    (url.startsWith('"') && url.endsWith('"')) ||
+    (url.startsWith("'") && url.endsWith("'"))
+  ) {
+    url = url.slice(1, -1).trim();
+  }
+
+  const schemeIndex = url.indexOf('://');
+  const equalsIndex = url.indexOf('=');
+  if (equalsIndex !== -1 && (schemeIndex === -1 || equalsIndex < schemeIndex)) {
+    const afterEquals = url.slice(equalsIndex + 1).trim();
+    if (afterEquals.includes('://')) url = afterEquals;
+  }
+
+  return url;
+}
+
 function getMysqlConfig() {
-  const url = String(process.env.MYSQL_URL || '').trim();
+  const url = normalizeMysqlUrl(process.env.MYSQL_URL);
   if (url) return { url };
 
   const host = String(process.env.MYSQL_HOST || '').trim();
@@ -67,4 +88,3 @@ module.exports = {
   isMysqlConfigured,
   ensureTable,
 };
-

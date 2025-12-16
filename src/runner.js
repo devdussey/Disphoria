@@ -15,10 +15,25 @@ function run(cmd, args, options = {}) {
   });
 }
 
+function runCapture(cmd, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options });
+    let stdout = '';
+    let stderr = '';
+    p.stdout.on('data', (d) => (stdout += d.toString()));
+    p.stderr.on('data', (d) => (stderr += d.toString()));
+    p.on('close', (code) =>
+      code === 0 ? resolve({ stdout, stderr }) : reject(new Error(`${cmd} exited with code ${code}: ${stderr || stdout}`)),
+    );
+    p.on('error', reject);
+  });
+}
+
 (async () => {
   // Optional Git pull on start
   const gitPullOnStart = String(process.env.GIT_PULL_ON_START || '').toLowerCase() === 'true';
   const gitResetHard = String(process.env.GIT_RESET_HARD || '').toLowerCase() === 'true';
+  const gitStashOnStart = String(process.env.GIT_STASH_ON_START || '').toLowerCase() === 'true';
   const gitBranch = process.env.GIT_BRANCH;
   const cwd = process.cwd();
   const hasGit = fs.existsSync(path.join(cwd, '.git'));
@@ -26,9 +41,19 @@ function run(cmd, args, options = {}) {
   if (gitPullOnStart && hasGit) {
     console.log('[runner] GIT_PULL_ON_START=true → updating repository');
     try {
+      const { stdout: statusOut } = await runCapture('git', ['status', '--porcelain']);
+      const isDirty = statusOut.trim().length > 0;
+      if (isDirty && !gitResetHard && !gitStashOnStart) {
+        console.warn(
+          '[runner] repo has local changes; set GIT_RESET_HARD=true to discard them (recommended for deploy) or GIT_STASH_ON_START=true to stash them before pulling',
+        );
+      }
       if (gitResetHard) {
         console.log('[runner] git reset --hard');
         await run('git', ['reset', '--hard']);
+      } else if (isDirty && gitStashOnStart) {
+        console.log('[runner] git stash push -u (autostash)');
+        await run('git', ['stash', 'push', '-u', '-m', 'runner autostash']);
       }
       console.log('[runner] git fetch --all --prune');
       await run('git', ['fetch', '--all', '--prune']);

@@ -51,6 +51,9 @@ This project is licensed under the MIT License.
 - Check that your bot has the required permissions
 - Global commands can take up to 1 hour to appear
 
+**Auto-update (git pull) failing on start?**
+- If you see “local changes … would be overwritten”, your host has modified `package.json`/`package-lock.json`; set `GIT_RESET_HARD=true` (or `GIT_STASH_ON_START=true`) along with `GIT_PULL_ON_START=true`.
+
 **Bot not responding?**
 - Verify your bot token is correct
 - Ensure the bot is online (check Discord)
@@ -67,3 +70,9 @@ This project is licensed under the MIT License.
 - `OWNER_FALLBACK_ON_CHANNEL_FAIL`: When set to `true`, if a guild’s log delivery mode is set to `channel` and sending to the configured channel fails (missing/not set/inaccessible), the bot will fall back to DMing bot owners. When unset or `false`, no owner-DM fallback occurs in `channel` mode. Applies to both moderation and security logs.
 - `BOT_OWNER_IDS`: Space or comma separated list of bot owner user IDs. Takes precedence over `BOT_OWNER_ID` when both are set.
 - `BOT_OWNER_ID`: Single fallback bot owner user ID used when `BOT_OWNER_IDS` is unset (accepts space/comma separated IDs for compatibility).
+- `GIT_PULL_ON_START`: When `true`, runs `git fetch` + `git pull --ff-only` on boot (for hosting panels).
+- `GIT_RESET_HARD`: When `true` and `GIT_PULL_ON_START=true`, discards local changes before pulling.
+- `GIT_STASH_ON_START`: When `true` and `GIT_PULL_ON_START=true`, stashes local changes before pulling.
+- `NPM_CI_ON_START`: When `false`, skips `npm ci --omit=dev` on boot.
+- `DEPLOY_CMDS_ON_START`: When `true`, runs `deploy-commands.js` on boot.
+- `EXIT_ON_DEPLOY_FAIL`: When `true`, exits if `deploy-commands.js` fails.
