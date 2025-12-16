@@ -52,6 +52,10 @@ function ensureGuildId(guildId) {
 let fileCache = null;
 let dbCache = new Map(); // guildId -> { loadedAt, entries }
 const DB_CACHE_TTL_MS = 30_000;
+let mysqlUnavailableUntil = 0;
+let mysqlLastErrorLogAt = 0;
+const MYSQL_BACKOFF_MS = 60_000;
+const MYSQL_ERROR_LOG_THROTTLE_MS = 30_000;
 
 async function ensureFileLoaded() {
   if (fileCache) return;
@@ -89,13 +93,21 @@ async function persistFile() {
 }
 
 async function getDbPoolReady() {
+  if (mysqlUnavailableUntil && Date.now() < mysqlUnavailableUntil) return null;
+
   const pool = getMysqlPool();
   if (!pool) return null;
   try {
     await ensureTable(pool, TABLE_NAME, CREATE_TABLE_SQL);
+    mysqlUnavailableUntil = 0;
     return pool;
   } catch (err) {
-    console.error('Failed to ensure MySQL log routing table:', err?.message || err);
+    const now = Date.now();
+    mysqlUnavailableUntil = now + MYSQL_BACKOFF_MS;
+    if ((now - mysqlLastErrorLogAt) >= MYSQL_ERROR_LOG_THROTTLE_MS) {
+      mysqlLastErrorLogAt = now;
+      console.error('Failed to ensure MySQL log routing table:', err?.message || err);
+    }
     return null;
   }
 }
