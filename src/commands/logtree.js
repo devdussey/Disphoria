@@ -4,16 +4,9 @@ const { listCategories, listKeysForCategory, getLogKeyLabel } = require('../util
 const { resolveEmbedColour } = require('../utils/guildColourStore');
 const { isMysqlConfigured } = require('../utils/mysqlPool');
 
-function isEnabledWithChannel(entry) {
-  return Boolean(entry?.channelId) && entry?.enabled !== false;
-}
-
-function formatKeyLine(logKey, entry) {
-  const label = getLogKeyLabel(logKey);
-  const channel = entry?.channelId ? `<#${entry.channelId}>` : null;
-  const status = entry?.enabled === false ? '❌' : (channel ? '✅' : '❌');
-  if (entry?.enabled === false) return `${status} ${label}${channel ? ` — ${channel}` : ''}`;
-  return `${status} ${label}${channel ? ` — ${channel}` : ''}`;
+const PERM_NAME_BY_VALUE = new Map(Object.entries(PermissionsBitField.Flags).map(([name, value]) => [value, name]));
+function permName(value) {
+  return PERM_NAME_BY_VALUE.get(value) || String(value);
 }
 
 function buildFieldValue(lines, emptyMessage) {
@@ -30,6 +23,43 @@ function buildFieldValue(lines, emptyMessage) {
     total += (total ? 1 : 0) + line.length;
   }
   return out.join('\n').slice(0, 1024) || emptyMessage;
+}
+
+async function describeRoute(guild, me, getChannel, logKey, entry) {
+  const label = getLogKeyLabel(logKey);
+  const channelId = entry?.channelId ? String(entry.channelId) : null;
+
+  if (entry?.enabled === false) {
+    return { ok: false, line: `❌ ${label} (disabled)` };
+  }
+  if (!channelId) {
+    return { ok: false, line: `❌ ${label} (no channel)` };
+  }
+
+  const channel = await getChannel(channelId);
+  if (!channel) {
+    return { ok: false, line: `❌ ${label} — <#${channelId}> (no access)` };
+  }
+  if (!channel.isTextBased?.()) {
+    return { ok: false, line: `❌ ${label} — <#${channelId}> (not text)` };
+  }
+
+  if (me) {
+    const isThread = typeof channel.isThread === 'function' ? channel.isThread() : Boolean(channel.isThread);
+    const required = [
+      PermissionsBitField.Flags.ViewChannel,
+      isThread ? PermissionsBitField.Flags.SendMessagesInThreads : PermissionsBitField.Flags.SendMessages,
+      PermissionsBitField.Flags.EmbedLinks,
+    ];
+    const perms = channel.permissionsFor(me);
+    const missing = required.filter(flag => !perms?.has(flag)).map(permName);
+    if (missing.length) {
+      const short = missing.slice(0, 3).join(', ') + (missing.length > 3 ? ` (+${missing.length - 3})` : '');
+      return { ok: false, line: `❌ ${label} — <#${channelId}> (missing ${short})` };
+    }
+  }
+
+  return { ok: true, line: `✅ ${label} — <#${channelId}>` };
 }
 
 module.exports = {
@@ -51,6 +81,20 @@ module.exports = {
     await interaction.deferReply({ ephemeral: true });
 
     try {
+      const guild = interaction.guild;
+      if (!guild) {
+        return interaction.editReply({ content: 'Could not resolve this server. Please try again.' });
+      }
+
+      const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
+      const channelCache = new Map();
+      const getChannel = async (channelId) => {
+        if (channelCache.has(channelId)) return channelCache.get(channelId);
+        const fetched = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+        channelCache.set(channelId, fetched || null);
+        return fetched || null;
+      };
+
       const entries = await logChannelTypeStore.getAll(interaction.guildId);
       const categories = listCategories();
 
@@ -69,10 +113,15 @@ module.exports = {
 
       for (const category of categories) {
         const keys = listKeysForCategory(category);
-        const categoryEnabled = keys.some(key => isEnabledWithChannel(entries?.[key]));
         const notableKeys = keys.filter(key => entries?.[key]?.channelId || entries?.[key]?.enabled === false);
 
-        const lines = notableKeys.map(key => formatKeyLine(key, entries?.[key]));
+        const routes = [];
+        for (const key of notableKeys) {
+          routes.push(await describeRoute(guild, me, getChannel, key, entries?.[key]));
+        }
+
+        const categoryEnabled = routes.some(route => route.ok);
+        const lines = routes.map(route => route.line);
         const value = buildFieldValue(lines, 'No routes configured.');
 
         embed.addFields({
@@ -89,4 +138,3 @@ module.exports = {
     }
   },
 };
-

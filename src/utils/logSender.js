@@ -1,4 +1,5 @@
 // Unified log sender that routes logs to appropriate channels based on key
+const { PermissionsBitField } = require('discord.js');
 const logChannelTypeStore = require('./logChannelTypeStore');
 const { getFallbackKey } = require('./logEvents');
 const { parseOwnerIds } = require('./ownerIds');
@@ -48,17 +49,48 @@ async function sendLog(options) {
   try {
     if (channelId && client) {
       const guild = client.guilds.cache.get(guildId);
-      if (guild) {
+      if (!guild) {
+        console.error(`logSender: Guild ${guildId} not found in cache for ${logType}`);
+      } else {
         const channel = guild.channels.cache.get(channelId) ||
-          await guild.channels.fetch(channelId).catch(() => null);
+          await guild.channels.fetch(channelId).catch(err => {
+            const code = err?.code || err?.status;
+            console.error(`logSender: Failed to fetch channel ${channelId} in guild ${guildId} for ${logType} (code ${code}):`, err?.message || err);
+            return null;
+          });
 
-        if (channel && channel.isTextBased?.()) {
-          try {
-            const embeds = Array.isArray(embed) ? embed : [embed];
-            await channel.send({ embeds });
-            sentSuccessfully = true;
-          } catch (err) {
-            console.error(`Failed to send ${logType} log to channel ${channelId}:`, err.message);
+        if (!channel) {
+          console.error(`logSender: Channel ${channelId} not found/accessible in guild ${guildId} for ${logType}`);
+        } else if (!channel.isTextBased?.()) {
+          console.error(`logSender: Channel ${channelId} is not text-based for ${logType}`);
+        } else {
+          let allowed = true;
+          const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
+          if (me) {
+            const required = [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.EmbedLinks,
+              channel.isThread ? PermissionsBitField.Flags.SendMessagesInThreads : PermissionsBitField.Flags.SendMessages,
+            ];
+            const perms = channel.permissionsFor(me);
+            if (!perms || !perms.has(required)) {
+              allowed = false;
+              const missing = required
+                .filter(flag => !perms?.has(flag))
+                .map(flag => Object.entries(PermissionsBitField.Flags).find(([, v]) => v === flag)?.[0] || String(flag));
+              console.error(`logSender: Missing permissions in channel ${channelId} for ${logType}: ${missing.join(', ') || 'Unknown'}`);
+            }
+          }
+
+          if (allowed) {
+            try {
+              const embeds = Array.isArray(embed) ? embed : [embed];
+              await channel.send({ embeds });
+              sentSuccessfully = true;
+            } catch (err) {
+              const code = err?.code || err?.status;
+              console.error(`Failed to send ${logType} log to channel ${channelId} (code ${code}):`, err?.message || err);
+            }
           }
         }
       }
