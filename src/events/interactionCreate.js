@@ -10,6 +10,8 @@ const logSender = require('../utils/logSender');
 const logChannelTypeStore = require('../utils/logChannelTypeStore');
 const logConfigManager = require('../utils/logConfigManager');
 const logConfigView = require('../utils/logConfigView');
+const openPollStore = require('../utils/openPollStore');
+const openPollManager = require('../utils/openPollManager');
 
 async function logCommandUsage(interaction, status, details, color = 0x5865f2) {
     if (!interaction.guildId) return;
@@ -289,6 +291,70 @@ module.exports = {
                 }
                 return;
             }
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('openpoll:')) {
+                if (!interaction.inGuild()) {
+                    try { await interaction.reply({ content: 'Polls can only be used in a server.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                const [, action, pollId] = interaction.customId.split(':');
+                if (!action || !pollId) return;
+
+                const poll = openPollStore.getPoll(interaction.guildId, pollId);
+                if (!poll) {
+                    try { await interaction.reply({ content: 'That poll is no longer available.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                if (action === 'add') {
+                    if (poll.open === false) {
+                        try { await interaction.reply({ content: 'This poll is closed.', ephemeral: true }); } catch (_) {}
+                        return;
+                    }
+
+                    const modal = new ModalBuilder()
+                        .setCustomId(`openpoll:submit:${pollId}`)
+                        .setTitle('Add an answer');
+
+                    const input = new TextInputBuilder()
+                        .setCustomId('openpoll:answer')
+                        .setLabel('Your answer')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setRequired(true)
+                        .setMaxLength(200);
+
+                    modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+                    try {
+                        await interaction.showModal(modal);
+                    } catch (_) {
+                        try { await interaction.reply({ content: 'Could not open the answer form. Please try again.', ephemeral: true }); } catch (_) {}
+                    }
+                    return;
+                }
+
+                if (action === 'toggle') {
+                    if (interaction.user.id !== poll.creatorId) {
+                        try { await interaction.reply({ content: 'Only the poll creator can open/close this poll.', ephemeral: true }); } catch (_) {}
+                        return;
+                    }
+
+                    const updated = openPollStore.togglePollOpen(interaction.guildId, pollId);
+                    if (!updated) {
+                        try { await interaction.reply({ content: 'That poll is no longer available.', ephemeral: true }); } catch (_) {}
+                        return;
+                    }
+
+                    try {
+                        await interaction.update(openPollManager.buildPollView(updated, interaction.guildId));
+                    } catch (_) {
+                        try { await interaction.deferUpdate(); } catch (_) {}
+                    }
+                    return;
+                }
+
+                return;
+            }
             if (typeof interaction.customId === 'string' && interaction.customId.startsWith('ticket:create:')) {
                 if (!interaction.inGuild()) {
                     try { await interaction.reply({ content: 'Tickets can only be opened in a server.', ephemeral: true }); } catch (_) {}
@@ -442,6 +508,55 @@ module.exports = {
 
         // Handle modal submissions
         if (interaction.isModalSubmit()) {
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('openpoll:submit:')) {
+                if (!interaction.inGuild()) {
+                    try { await interaction.reply({ content: 'Polls can only be used in a server.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                const [, , pollId] = interaction.customId.split(':');
+                if (!pollId) return;
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const poll = openPollStore.getPoll(interaction.guildId, pollId);
+                if (!poll) {
+                    await interaction.editReply({ content: 'That poll is no longer available.' });
+                    return;
+                }
+                if (poll.open === false) {
+                    await interaction.editReply({ content: 'This poll is closed.' });
+                    return;
+                }
+
+                let answer = '';
+                try { answer = (interaction.fields.getTextInputValue('openpoll:answer') || '').trim(); } catch (_) {}
+
+                const res = openPollStore.addAnswer(interaction.guildId, pollId, {
+                    text: answer,
+                    authorId: interaction.user.id,
+                    createdAt: Date.now(),
+                });
+
+                if (!res.ok) {
+                    const msg = res.error === 'max_answers'
+                        ? `This poll already has the maximum number of answers (${openPollStore.MAX_ANSWERS}).`
+                        : res.error === 'closed'
+                            ? 'This poll is closed.'
+                            : 'Please enter a valid answer.';
+                    await interaction.editReply({ content: msg });
+                    return;
+                }
+
+                try {
+                    await openPollManager.updatePollMessage(interaction.client, res.poll);
+                } catch (err) {
+                    console.error('Failed to update open poll message:', err);
+                }
+
+                await interaction.editReply({ content: 'Your answer has been added.' });
+                return;
+            }
             if (typeof interaction.customId === 'string' && interaction.customId.startsWith('confess:submit:')) {
                 if (!interaction.inGuild()) return;
 
