@@ -3,12 +3,22 @@ const assert = require('node:assert/strict');
 
 const {
   pickLetters,
+  pickPlayableLetters,
   normaliseCandidateWord,
   containsLettersInOrder,
 } = require('../src/utils/wordRushLogic');
 
 test('pickLetters returns uppercase letters', () => {
   const letters = pickLetters(3);
+  assert.equal(Array.isArray(letters), true);
+  assert.equal(letters.length, 3);
+  for (const letter of letters) {
+    assert.match(letter, /^[A-Z]$/);
+  }
+});
+
+test('pickPlayableLetters returns uppercase letters', () => {
+  const letters = pickPlayableLetters();
   assert.equal(Array.isArray(letters), true);
   assert.equal(letters.length, 3);
   for (const letter of letters) {

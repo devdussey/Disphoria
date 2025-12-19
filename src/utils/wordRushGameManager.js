@@ -2,12 +2,14 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   escapeMarkdown,
 } = require('discord.js');
 const wordRushStatsStore = require('./wordRushStatsStore');
 const rupeeStore = require('./rupeeStore');
+const { resolveEmbedColour } = require('./guildColourStore');
 const {
-  pickLetters,
+  pickPlayableLetters,
   formatLetters,
   normaliseCandidateWord,
   containsLettersInOrder,
@@ -15,6 +17,7 @@ const {
 
 const JOIN_WINDOW_MS = 30_000;
 const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 20;
 const LIVES_PER_PLAYER = 2;
 
 const DEFAULT_TURN_SECONDS = 10;
@@ -51,6 +54,9 @@ function joinWordRushGame(game, user) {
   if (!game || !user) return { ok: false, error: 'No active WordRush game found.' };
   if (game.stage !== 'waiting') {
     return { ok: false, error: 'The join window is closed.' };
+  }
+  if (game.players.length >= MAX_PLAYERS) {
+    return { ok: false, error: `This WordRush lobby is full (max ${MAX_PLAYERS} players).` };
   }
   if (game.playerSet.has(user.id)) {
     return { ok: true, joined: false };
@@ -156,29 +162,70 @@ function buildLobbyComponents({ joinButtonId, disabled }) {
   return [row];
 }
 
-function renderLobbyState(game, joinDeadline) {
+function getEmbedColour(game) {
+  return resolveEmbedColour(game.guildId, 0x5865F2);
+}
+
+function formatRoster(game) {
+  return game.players.length ? game.players.map(id => `<@${id}>`).join(', ') : '_No players yet._';
+}
+
+function buildLobbyEmbed(game, joinDeadline) {
   const now = Date.now();
   const secondsLeft = Math.max(0, Math.ceil((joinDeadline - now) / 1000));
-  const roster = game.players.length
-    ? game.players.map(id => `<@${id}>`).join(', ')
-    : '_No players yet._';
 
-  const lines = [
-    '**WordRush Lobby**',
-    `Click **Join WordRush** to enter. Starting in **${secondsLeft}s**.`,
-    `Lives: **${LIVES_PER_PLAYER}** each  •  Turn timer: **${game.turnSeconds}s**`,
-    '',
-    `Players (${game.players.length}): ${roster}`,
-  ];
-  return lines.join('\n');
+  return new EmbedBuilder()
+    .setColor(getEmbedColour(game))
+    .setTitle('WordRush Lobby')
+    .setDescription(`Click **Join WordRush** below to enter.\nStarting in **${secondsLeft}s**.`)
+    .addFields(
+      { name: `Players (${game.players.length}/${MAX_PLAYERS})`, value: formatRoster(game) },
+      {
+        name: 'Rules',
+        value: 'On your turn, you get 3 letters and have a short time limit to reply with a single word that contains those letters **in order**.\nNames and swear words are allowed.',
+      },
+      { name: 'Settings', value: `Lives: **${LIVES_PER_PLAYER}** each\nTurn timer: **${game.turnSeconds}s**` },
+    );
+}
+
+function buildTurnEmbed(game, { userId, letters, livesRemaining, lastResult }) {
+  const embed = new EmbedBuilder()
+    .setColor(getEmbedColour(game))
+    .setTitle('WordRush')
+    .setDescription(`Turn: <@${userId}>\nReply with a single word containing the letters **in order**.`)
+    .addFields(
+      { name: 'Letters', value: `**${formatLetters(letters)}**`, inline: true },
+      { name: 'Time', value: `**${game.turnSeconds}s**`, inline: true },
+      { name: 'Lives', value: `**${livesRemaining}**`, inline: true },
+      { name: 'Players', value: formatLivesBoard(game) },
+    );
+
+  if (lastResult) {
+    embed.addFields({ name: 'Last Result', value: lastResult });
+  }
+
+  return embed;
+}
+
+function buildStatusEmbed(game, { title, description, fields }) {
+  const embed = new EmbedBuilder()
+    .setColor(getEmbedColour(game))
+    .setTitle(title || 'WordRush')
+    .setDescription(description || '');
+
+  if (Array.isArray(fields) && fields.length) {
+    embed.addFields(...fields);
+  }
+
+  return embed;
 }
 
 async function runWordRushGame(game) {
   const joinDeadline = Date.now() + JOIN_WINDOW_MS;
 
   const lobbyMessage = await game.channel.send({
-    content: renderLobbyState(game, joinDeadline),
-    components: buildLobbyComponents({ joinButtonId: game.joinButtonId }),
+    embeds: [buildLobbyEmbed(game, joinDeadline)],
+    components: buildLobbyComponents({ joinButtonId: game.joinButtonId, disabled: game.players.length >= MAX_PLAYERS }),
     allowedMentions: { parse: [] },
   }).catch(() => null);
 
@@ -198,8 +245,8 @@ async function runWordRushGame(game) {
     if (game.isStopped || game.stage !== 'waiting') return;
     if (Date.now() >= joinDeadline) return;
     lobbyMessage.edit({
-      content: renderLobbyState(game, joinDeadline),
-      components: buildLobbyComponents({ joinButtonId: game.joinButtonId }),
+      embeds: [buildLobbyEmbed(game, joinDeadline)],
+      components: buildLobbyComponents({ joinButtonId: game.joinButtonId, disabled: game.players.length >= MAX_PLAYERS }),
       allowedMentions: { parse: [] },
     }).catch(() => {});
   }, 5_000);
@@ -223,8 +270,8 @@ async function runWordRushGame(game) {
 
     await componentInteraction.reply({ content: 'Joined WordRush!', ephemeral: true }).catch(() => {});
     await lobbyMessage.edit({
-      content: renderLobbyState(game, joinDeadline),
-      components: buildLobbyComponents({ joinButtonId: game.joinButtonId }),
+      embeds: [buildLobbyEmbed(game, joinDeadline)],
+      components: buildLobbyComponents({ joinButtonId: game.joinButtonId, disabled: game.players.length >= MAX_PLAYERS }),
       allowedMentions: { parse: [] },
     }).catch(() => {});
   });
@@ -238,15 +285,20 @@ async function runWordRushGame(game) {
 
   if (game.isStopped) {
     await lobbyMessage.edit({
+      embeds: [
+        buildStatusEmbed(game, {
+          title: 'WordRush',
+          description: game.stopReason === 'stopped'
+            ? 'WordRush stopped.'
+            : game.stopReason === 'no-players'
+              ? 'WordRush ended: no players remaining.'
+              : 'WordRush ended.',
+          fields: [{ name: `Players (${game.players.length})`, value: formatRoster(game) }],
+        }),
+      ],
       components: buildLobbyComponents({ joinButtonId: game.joinButtonId, disabled: true }),
+      allowedMentions: { parse: [] },
     }).catch(() => {});
-    if (game.stopReason === 'stopped') {
-      await game.channel.send({ content: 'WordRush stopped.' }).catch(() => {});
-    } else if (game.stopReason === 'no-players') {
-      await game.channel.send({ content: 'WordRush ended: no players remaining.' }).catch(() => {});
-    } else if (game.stopReason) {
-      await game.channel.send({ content: 'WordRush ended.' }).catch(() => {});
-    }
     return;
   }
 
@@ -254,13 +306,22 @@ async function runWordRushGame(game) {
   game.startedPlayerIds = Array.from(game.playerSet);
 
   await lobbyMessage.edit({
-    content: renderLobbyState(game, joinDeadline),
+    embeds: [buildLobbyEmbed(game, joinDeadline)],
     components: buildLobbyComponents({ joinButtonId: game.joinButtonId, disabled: true }),
     allowedMentions: { parse: [] },
   }).catch(() => {});
 
   if (game.players.length < MIN_PLAYERS) {
-    await game.channel.send({ content: `Not enough players joined (need ${MIN_PLAYERS}). WordRush cancelled.` }).catch(() => {});
+    await lobbyMessage.edit({
+      embeds: [
+        buildStatusEmbed(game, {
+          title: 'WordRush Cancelled',
+          description: `Not enough players joined (need ${MIN_PLAYERS}).`,
+          fields: [{ name: `Players (${game.players.length})`, value: formatRoster(game) }],
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
     game.stop('not-enough-players');
     return;
   }
@@ -269,14 +330,19 @@ async function runWordRushGame(game) {
     game.lives.set(userId, LIVES_PER_PLAYER);
   }
 
-  const introLines = [
-    '**WordRush** starting!',
-    `Players: ${game.players.map(id => `<@${id}>`).join(', ')}`,
-    `Lives: **${LIVES_PER_PLAYER}** each. Miss your turn and lose a life.`,
-    `Each turn: **${game.turnSeconds}s** to respond with a single word that contains the 3 letters **in the same order**.`,
-  ];
-
-  await game.channel.send({ content: introLines.join('\n') }).catch(() => {});
+  await lobbyMessage.edit({
+    embeds: [
+      buildStatusEmbed(game, {
+        title: 'WordRush Started',
+        description: 'Game is live. Wait for your turn!',
+        fields: [
+          { name: `Players (${game.players.length})`, value: formatRoster(game) },
+          { name: 'Settings', value: `Lives: **${LIVES_PER_PLAYER}** each\nTurn timer: **${game.turnSeconds}s**` },
+        ],
+      }),
+    ],
+    allowedMentions: { parse: [] },
+  }).catch(() => {});
 
   while (!game.isStopped) {
     if (!game.players.length) {
@@ -307,30 +373,37 @@ async function runWordRushGame(game) {
       continue;
     }
 
-    const letters = pickLetters(3);
+    const letters = pickPlayableLetters();
 
-    const promptLines = [
-      `Turn: <@${userId}>`,
-      `Letters: **${formatLetters(letters)}**`,
-      `You have ${game.turnSeconds}s. Reply with a single word containing those letters in order.`,
-      `Lives remaining: **${livesRemaining}**`,
-    ];
-
-    await game.channel.send({ content: promptLines.join('\n') }).catch(() => {});
+    await lobbyMessage.edit({
+      embeds: [
+        buildTurnEmbed(game, {
+          userId,
+          letters,
+          livesRemaining,
+          lastResult: game.lastResult || null,
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
 
     // eslint-disable-next-line no-await-in-loop
     const response = await waitForTurnWord(game, userId, letters);
     if (game.isStopped) break;
 
     if (response.ok && response.word) {
-      const okLines = [
-        `<@${userId}> survives with **${escapeMarkdown(response.word)}**.`,
-        '',
-        '**Lives**',
-        formatLivesBoard(game),
-      ];
-
-      await game.channel.send({ content: okLines.join('\n') }).catch(() => {});
+      game.lastResult = `<@${userId}> survives with **${escapeMarkdown(response.word)}**.`;
+      await lobbyMessage.edit({
+        embeds: [
+          buildTurnEmbed(game, {
+            userId,
+            letters,
+            livesRemaining,
+            lastResult: game.lastResult,
+          }),
+        ],
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
     } else {
       const nextLives = (game.lives.get(userId) ?? 0) - 1;
       game.lives.set(userId, Math.max(0, nextLives));
@@ -341,15 +414,20 @@ async function runWordRushGame(game) {
         game.playerSet.delete(userId);
       }
 
-      const failLines = [
-        `<@${userId}> failed the turn and lost a life.`,
-        eliminated ? `Eliminated: <@${userId}>` : `Lives remaining: **${Math.max(0, nextLives)}**`,
-        '',
-        '**Lives**',
-        formatLivesBoard(game),
-      ];
+      game.lastResult = eliminated
+        ? `<@${userId}> failed the turn and was eliminated.`
+        : `<@${userId}> failed the turn and lost a life. Lives remaining: **${Math.max(0, nextLives)}**.`;
 
-      await game.channel.send({ content: failLines.join('\n') }).catch(() => {});
+      await lobbyMessage.edit({
+        embeds: [
+          buildStatusEmbed(game, {
+            title: 'WordRush',
+            description: game.lastResult,
+            fields: [{ name: 'Players', value: formatLivesBoard(game) }],
+          }),
+        ],
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
 
       if (game.players.length === 1) {
         game.winnerId = game.players[0];
@@ -380,8 +458,15 @@ async function runWordRushGame(game) {
       ? `Winner earned **1 Rupee**. New balance: **${newBalance}**.`
       : 'Winner earned **1 Rupee**.';
 
-    await game.channel.send({
-      content: `Game over! Winner: <@${game.winnerId}>\n${rupeeLine}`,
+    await lobbyMessage.edit({
+      embeds: [
+        buildStatusEmbed(game, {
+          title: 'WordRush Complete',
+          description: `Winner: <@${game.winnerId}>\n${rupeeLine}`,
+          fields: [{ name: 'Final Players', value: formatLivesBoard(game) }],
+        }),
+      ],
+      allowedMentions: { parse: [] },
     }).catch(() => {});
 
     wordRushStatsStore.recordGame(game.guildId, {
@@ -395,16 +480,40 @@ async function runWordRushGame(game) {
   }
 
   if (game.stopReason === 'no-players') {
-    await game.channel.send({ content: 'WordRush ended: no players remaining.' }).catch(() => {});
+    await lobbyMessage.edit({
+      embeds: [
+        buildStatusEmbed(game, {
+          title: 'WordRush Ended',
+          description: 'No players remaining.',
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
     return;
   }
 
   if (game.stopReason && game.stopReason !== 'stopped') {
-    await game.channel.send({ content: 'WordRush ended.' }).catch(() => {});
+    await lobbyMessage.edit({
+      embeds: [
+        buildStatusEmbed(game, {
+          title: 'WordRush Ended',
+          description: 'WordRush ended.',
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
     return;
   }
 
-  await game.channel.send({ content: 'WordRush stopped.' }).catch(() => {});
+  await lobbyMessage.edit({
+    embeds: [
+      buildStatusEmbed(game, {
+        title: 'WordRush Stopped',
+        description: 'WordRush stopped.',
+      }),
+    ],
+    allowedMentions: { parse: [] },
+  }).catch(() => {});
 }
 
 async function startWordRushGame(interaction, options) {
@@ -447,6 +556,7 @@ async function startWordRushGame(interaction, options) {
     winnerId: null,
     startedPlayerIds: null,
     startedAt: Date.now(),
+    lastResult: null,
   };
 
   game.stop = (reason) => {

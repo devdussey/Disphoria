@@ -106,10 +106,6 @@ module.exports = {
         return interaction.reply({ content: 'You are already in this WordRush game.', ephemeral: true });
       }
 
-      try {
-        await channel.send({ content: `<@${interaction.user.id}> joined WordRush!` });
-      } catch (_) {}
-
       return interaction.reply({ content: 'Joined WordRush.', ephemeral: true });
     }
 
@@ -127,10 +123,6 @@ module.exports = {
       if (!left.left) {
         return interaction.reply({ content: 'You are not in this WordRush game.', ephemeral: true });
       }
-
-      try {
-        await channel.send({ content: `<@${interaction.user.id}> left WordRush.` });
-      } catch (_) {}
 
       return interaction.reply({ content: 'Left WordRush.', ephemeral: true });
     }
