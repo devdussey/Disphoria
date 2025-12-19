@@ -1,6 +1,4 @@
 const { Events, AuditLogEvent, PermissionsBitField, EmbedBuilder } = require('discord.js');
-const jlStore = require('../utils/joinLeaveStore');
-const leaveStore = require('../utils/leaveStore');
 const logSender = require('../utils/logSender');
 
 module.exports = {
@@ -22,8 +20,6 @@ module.exports = {
           if (ban) reason = 'ban';
         } catch (_) { /* ignore */ }
       }
-      jlStore.addEvent(guild.id, member.id, 'leave', Date.now(), { reason });
-
       // Bans are handled by the GuildBanAdd event to avoid duplicates.
       if (reason === 'ban') return;
 
@@ -46,30 +42,6 @@ module.exports = {
       });
     } catch (e) {
       // swallow
-    }
-
-    try {
-      const cfg = leaveStore.get(member.guild.id);
-      if (!cfg || !cfg.channelId || !cfg.embed) return;
-      const channel = await member.guild.channels.fetch(cfg.channelId).catch(() => null);
-      if (!channel || !channel.isTextBased?.()) return;
-
-      const userTag = member.user?.tag || member.user?.username || member.user?.id || 'User';
-      const replacer = (value) => String(value || '')
-        .replaceAll('{user}', userTag)
-        .replaceAll('{mention}', `<@${member.id}>`)
-        .replaceAll('{guild}', `${member.guild.name}`)
-        .replaceAll('{memberCount}', `${member.guild.memberCount}`);
-
-      const embed = EmbedBuilder.from(cfg.embed);
-      const data = embed.toJSON();
-      if (data.title) embed.setTitle(replacer(data.title));
-      if (data.description) embed.setDescription(replacer(data.description));
-      if (data.footer?.text) embed.setFooter({ text: replacer(data.footer.text), iconURL: data.footer.icon_url || undefined });
-
-      await channel.send({ content: replacer('{user} has left the server.'), embeds: [embed] });
-    } catch (_) {
-      // ignore leave message failures
     }
   },
 };

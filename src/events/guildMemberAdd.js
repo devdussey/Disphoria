@@ -1,6 +1,5 @@
 const { Events, PermissionsBitField, EmbedBuilder } = require('discord.js');
 const store = require('../utils/autorolesStore');
-const jlStore = require('../utils/joinLeaveStore');
 const welcomeStore = require('../utils/welcomeStore');
 const blacklist = require('../utils/blacklistStore');
 const logSender = require('../utils/logSender');
@@ -44,9 +43,6 @@ module.exports = {
         } catch (_) {}
 
         try {
-            // Record join
-            try { jlStore.addEvent(member.guild.id, member.id, 'join', Date.now()); } catch (_) {}
-
             const roleIds = store.getGuildRoles(member.guild.id);
             if (!roleIds.length) return;
 

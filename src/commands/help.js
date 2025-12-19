@@ -10,7 +10,6 @@ const { isOwner } = require('../utils/ownerIds');
 const categories = {
   'Moderation & Enforcement': [
     { cmd: '/showbans', desc: 'Fetch and cache the server ban list for cross-server checks', perm: 'Ban Members' },
-    { cmd: '/bannedfrom', desc: 'See which synced servers have banned a specific user', perm: 'Manage Server' },
     { cmd: '/mute', desc: 'Timeout a member for a set duration (reason required)', perm: 'Moderate Members' },
     { cmd: '/kick', desc: 'Remove a member from the server with a required reason', perm: 'Kick Members' },
     { cmd: '/ban', desc: 'Ban a member with optional message pruning (reason required)', perm: 'Ban Members' },
@@ -35,13 +34,10 @@ const categories = {
     { cmd: '/logconfig', desc: 'Create or sync dedicated channels for every tracked log event', perm: 'Manage Server' },
     { cmd: '/tamperproof add/remove/list', desc: 'Watch channels for admin deletions and DM bot owners', perm: 'Manage Channels · Premium' },
     { cmd: '/antinuke config', desc: 'Configure anti-nuke safeguards and view their current status', perm: 'Manage Server' },
-    { cmd: '/joins leaderboard/user/setlog/backfill', desc: 'Track join/leave stats and import historical logs', perm: 'Manage Server' },
     { cmd: '/transriptconfig enable/disable/status', desc: 'Enable automatic voice transcription in chosen channels', perm: 'Manage Server' },
-    { cmd: '/securityreport', desc: 'Report members frequently triggering permission or hierarchy issues', perm: 'Manage Server' },
   ],
   'Server Setup & Messaging': [
     { cmd: '/welcome setup/status/disable/test', desc: 'Build and manage welcome messages for new members', perm: 'Manage Server' },
-    { cmd: '/leave setup/status/disable/test', desc: 'Send customised farewells when members depart', perm: 'Manage Server' },
     { cmd: '/confessconfig', desc: 'Post the anonymous confession button to a channel', perm: 'Manage Server' },
     { cmd: '/autobump add/remove/enable/disable/list', desc: 'Schedule automatic bumps for server listing sites', perm: 'Manage Server' },
     { cmd: '/createchannel', desc: 'Quickly create text, voice, or stage channels with optional category', perm: 'Manage Channels' },
@@ -49,7 +45,6 @@ const categories = {
     { cmd: '/autorespond toggle/add/remove/list', desc: 'Automate keyword replies with optional channel filters', perm: 'Administrator' },
     { cmd: '/repeat start/stop/list', desc: 'Schedule repeating messages every N seconds (≥ 60)', perm: 'Administrator' },
     { cmd: '/say', desc: 'Send a custom message as the bot in any channel you specify', perm: 'Administrator' },
-    { cmd: '/servertag set/show/clear', desc: 'Store a server tag for quick reference across commands', perm: 'Manage Server' },
     { cmd: '/ticketconfig', desc: 'Define support roles, logging, and limits for tickets', perm: 'Manage Server' },
     { cmd: '/panelsetup', desc: 'Create ticket panels with buttons or select menus', perm: 'Manage Server' },
     { cmd: '/panellist', desc: 'Review configured ticket panels and their settings', perm: 'Manage Server' },
