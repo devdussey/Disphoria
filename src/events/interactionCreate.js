@@ -894,6 +894,27 @@ module.exports = {
                 });
                 return;
             }
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('wraith:start:')) {
+                const parts = interaction.customId.split(':');
+                const ownerId = parts[2];
+                const targetId = parts[3];
+                if (!ownerId || !targetId) return;
+                if (interaction.user.id !== ownerId) {
+                    try { await interaction.reply({ content: 'This wraith configuration modal is not for you.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                try {
+                    const wraith = require('../commands/isolate');
+                    if (typeof wraith.handleWraithStartModalSubmit === 'function') {
+                        await wraith.handleWraithStartModalSubmit(interaction, targetId);
+                    }
+                } catch (err) {
+                    console.error('Wraith modal submit failed:', err);
+                    try { await interaction.reply({ content: 'Failed to start wraith. Please try again.', ephemeral: true }); } catch (_) {}
+                }
+                return;
+            }
             if (interaction.customId === 'embedBuilderModal') {
                 await interaction.deferReply({ ephemeral: true });
 

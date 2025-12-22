@@ -94,7 +94,7 @@ const categories = {
   ],
   Premium: [
     { cmd: '/adminlist', desc: 'Owner audit: list mutual guilds where a user has Administrator', perm: 'Bot Owner · Premium' },
-    { cmd: '/wraith start/stop', desc: 'Isolate a member with relentless pings and Wraith embeds', perm: 'Bot Owner · Premium' },
+    { cmd: '/wraith start/stop', desc: 'Isolate a member with relentless pings and Wraith embeds (modal setup)', perm: 'Bot Owner · Premium' },
     { cmd: '/tamperproof add/remove/list', desc: 'Monitor channels for deletion tampering alerts', perm: 'Manage Channels · Premium' },
     { cmd: '/giverupee', desc: 'Grant Rupees directly with a Premium token', perm: 'Bot Owner or Guild Owner · Premium' },
     { cmd: '/cloneall', desc: 'Bulk import emojis from another server', perm: 'Manage Emojis and Stickers · Premium' },
@@ -106,7 +106,7 @@ const categories = {
     { cmd: '/fetchmessage', desc: 'Backfill user messages from a channel for analysis tools', perm: 'Bot Owner' },
     { cmd: '/dmdiag test/role', desc: 'Run DM diagnostics for a member or role', perm: 'Bot Owner' },
     { cmd: '/giverupee', desc: 'Grant Rupees directly to a user', perm: 'Bot Owner or Guild Owner · Premium' },
-    { cmd: '/wraith start/stop', desc: 'Create a private spam channel and isolate a member', perm: 'Bot Owner · Premium' },
+    { cmd: '/wraith start/stop', desc: 'Create a private spam channel and isolate a member (modal setup)', perm: 'Bot Owner · Premium' },
   ],
 };
 
