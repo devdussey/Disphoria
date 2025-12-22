@@ -24,7 +24,7 @@ function formatCoins(value) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('stfu')
-    .setDescription('Spend a Smite to silence a non-staff user for 10 minutes')
+    .setDescription('Spend a Rupee to silence a non-staff user for 10 minutes')
     .addUserOption(opt =>
       opt
         .setName('target')
