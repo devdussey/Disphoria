@@ -22,7 +22,6 @@ const categories = {
   'Roles & Identity': [
     { cmd: '/role add/remove', desc: 'Grant or remove specific roles from a member', perm: 'Manage Roles' },
     { cmd: '/autoroles add/remove/list/clear', desc: 'Automatically assign roles to new members', perm: 'Manage Roles' },
-    { cmd: '/reactionrole create', desc: 'Post an interactive message that lets members pick roles', perm: 'Manage Roles' },
     { cmd: '/verify setup/status/disable/repost', desc: 'Set up button verification with optional account-age rules', perm: 'Manage Server' },
     { cmd: '/createrole', desc: 'Create a role with colour, hoist, mentionable, and position options', perm: 'Manage Roles' },
     { cmd: '/deleterole', desc: 'Delete a role from the server', perm: 'Manage Roles' },

@@ -1,4 +1,4 @@
-const { Events, PermissionsBitField, EmbedBuilder, ModalBuilder, ActionRowBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Events, PermissionsBitField, EmbedBuilder, ModalBuilder, ActionRowBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const verifyStore = require('../utils/verificationStore');
 const securityLogger = require('../utils/securityLogger');
 const verifySession = require('../utils/verificationSession');
@@ -12,6 +12,38 @@ const logConfigManager = require('../utils/logConfigManager');
 const logConfigView = require('../utils/logConfigView');
 const openPollStore = require('../utils/openPollStore');
 const openPollManager = require('../utils/openPollManager');
+const reactionRoleStore = require('../utils/reactionRoleStore');
+
+function sanitiseUrl(input) {
+    if (!input || typeof input !== 'string') return null;
+    try {
+        const url = new URL(input.trim());
+        if (!['http:', 'https:'].includes(url.protocol)) return null;
+        return url.toString();
+    } catch (_) {
+        return null;
+    }
+}
+
+function parseRoleId(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return null;
+    const mentionMatch = raw.match(/^<@&(\d+)>$/);
+    if (mentionMatch) return mentionMatch[1];
+    const idMatch = raw.match(/^(\d{15,25})$/);
+    if (idMatch) return idMatch[1];
+    return null;
+}
+
+function parseEmoji(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return null;
+    const customMatch = raw.match(/^<a?:([a-zA-Z0-9_]+):(\d+)>$/);
+    if (customMatch) {
+        return { name: customMatch[1], id: customMatch[2], animated: raw.startsWith('<a:') };
+    }
+    return raw.slice(0, 50);
+}
 
 async function logCommandUsage(interaction, status, details, color = 0x5865f2) {
     if (!interaction.guildId) return;
@@ -91,8 +123,109 @@ module.exports = {
             }
         }
 
-        // Handle role selection menus (reaction role)
+        // Handle select menus
         if (interaction.isStringSelectMenu()) {
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('rr:panel:')) {
+                if (!interaction.inGuild()) {
+                    try { await interaction.reply({ content: 'Reaction roles can only be used in a server.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                const panelId = interaction.customId.split(':')[2];
+                if (!panelId) return;
+
+                const panel = reactionRoleStore.getPanel(interaction.guildId, panelId);
+                if (!panel) {
+                    try { await interaction.reply({ content: 'This reaction role panel no longer exists.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                const me = interaction.guild.members.me;
+                if (!me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)) {
+                    try { await interaction.reply({ content: 'I currently do not have Manage Roles, so I cannot update your roles.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                await interaction.deferReply({ ephemeral: true });
+
+                let member = interaction.member;
+                try {
+                    if (!member?.roles?.cache) member = await interaction.guild.members.fetch(interaction.user.id);
+                } catch (_) {}
+                if (!member?.roles?.cache) {
+                    await interaction.editReply({ content: 'Could not load your server member record. Please try again.' });
+                    return;
+                }
+
+                const panelRoleIds = panel.options.map(o => o.roleId);
+                const selected = Array.isArray(interaction.values) ? interaction.values.map(v => String(v)) : [];
+                const selectedRoleIds = selected.filter(id => panelRoleIds.includes(id));
+
+                const guildRoles = interaction.guild.roles;
+                const botTop = me.roles?.highest;
+
+                const manageable = (role) => {
+                    if (!role) return false;
+                    if (role.id === interaction.guildId) return false; // @everyone
+                    if (role.managed) return false;
+                    if (botTop && botTop.comparePositionTo(role) <= 0) return false;
+                    return true;
+                };
+
+                const wantedAdds = selectedRoleIds.filter(id => !member.roles.cache.has(id));
+                const wantedRemoves = panelRoleIds.filter(id => !selectedRoleIds.includes(id) && member.roles.cache.has(id));
+
+                const blocked = [];
+                const addIds = [];
+                const removeIds = [];
+
+                for (const rid of wantedAdds) {
+                    const role = guildRoles.cache.get(rid) || (await guildRoles.fetch(rid).catch(() => null));
+                    if (!role) {
+                        blocked.push(`Missing role (${rid})`);
+                        continue;
+                    }
+                    if (!manageable(role)) {
+                        blocked.push(`Cannot assign <@&${rid}> (role is managed or above my role)`);
+                        continue;
+                    }
+                    addIds.push(rid);
+                }
+
+                for (const rid of wantedRemoves) {
+                    const role = guildRoles.cache.get(rid) || (await guildRoles.fetch(rid).catch(() => null));
+                    if (!role) continue;
+                    if (!manageable(role)) {
+                        blocked.push(`Cannot remove <@&${rid}> (role is managed or above my role)`);
+                        continue;
+                    }
+                    removeIds.push(rid);
+                }
+
+                const changes = [];
+                try {
+                    if (addIds.length) {
+                        await member.roles.add(addIds, 'Reaction role panel selection');
+                        changes.push(`Added: ${addIds.map(id => `<@&${id}>`).join(', ')}`);
+                    }
+                    if (removeIds.length) {
+                        await member.roles.remove(removeIds, 'Reaction role panel selection');
+                        changes.push(`Removed: ${removeIds.map(id => `<@&${id}>`).join(', ')}`);
+                    }
+                } catch (err) {
+                    console.error('Reaction role update failed:', err);
+                    await interaction.editReply({ content: 'Failed to update your roles. Please try again or contact an admin.' });
+                    return;
+                }
+
+                const msg = [
+                    changes.length ? changes.join('\n') : 'No changes needed.',
+                    blocked.length ? `\nSkipped:\n- ${blocked.join('\n- ')}` : '',
+                ].join('');
+
+                await interaction.editReply({ content: msg.trim() });
+                return;
+            }
             if (typeof interaction.customId === 'string' && interaction.customId.startsWith('ticket:menu:')) {
                 if (!interaction.inGuild()) {
                     try { await interaction.reply({ content: 'Tickets can only be opened in a server.', ephemeral: true }); } catch (_) {}
@@ -109,46 +242,6 @@ module.exports = {
                 const option = panel.component?.options?.find(opt => opt.value === value);
                 const reason = option ? option.label : (value || 'Support request');
                 await ticketManager.openTicket(interaction, panel, reason);
-                return;
-            }
-            if (interaction.customId === 'rr:select') {
-                if (!interaction.inGuild()) return;
-                const me = interaction.guild.members.me;
-                if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-                    try { await interaction.reply({ content: 'I need Manage Roles to update your roles.', ephemeral: true }); } catch (_) {}
-                    return;
-                }
-                let member;
-                try { member = await interaction.guild.members.fetch(interaction.user.id); } catch (_) {}
-                if (!member) {
-                    try { await interaction.reply({ content: 'Could not fetch your member data.', ephemeral: true }); } catch (_) {}
-                    return;
-                }
-
-                // Determine which roles this menu manages (from the component options)
-                const menuRoles = interaction.component?.options?.map(o => o.value).filter(Boolean) || [];
-                const selected = interaction.values || [];
-
-                const toAdd = selected.filter(id => !member.roles.cache.has(id));
-                const toRemove = menuRoles.filter(id => !selected.includes(id) && member.roles.cache.has(id));
-
-                // Filter by hierarchy and non-managed
-                const safeAdd = toAdd.filter(id => {
-                    const role = interaction.guild.roles.cache.get(id);
-                    return role && !role.managed && me.roles.highest.comparePositionTo(role) > 0;
-                });
-                const safeRemove = toRemove.filter(id => {
-                    const role = interaction.guild.roles.cache.get(id);
-                    return role && !role.managed && me.roles.highest.comparePositionTo(role) > 0;
-                });
-
-                try {
-                    if (safeAdd.length) await member.roles.add(safeAdd, 'Reaction role selection');
-                    if (safeRemove.length) await member.roles.remove(safeRemove, 'Reaction role selection');
-                    await interaction.reply({ content: 'Your roles have been updated.', ephemeral: true });
-                } catch (err) {
-                    await interaction.reply({ content: `Failed to update roles: ${err.message}`, ephemeral: true });
-                }
                 return;
             }
             if (typeof interaction.customId === 'string' && interaction.customId === 'logconfig:category') {
@@ -614,6 +707,152 @@ module.exports = {
 
         // Handle modal submissions
         if (interaction.isModalSubmit()) {
+            if (typeof interaction.customId === 'string' && interaction.customId.startsWith('rrcreate:submit:')) {
+                if (!interaction.inGuild()) {
+                    try { await interaction.reply({ content: 'Reaction roles can only be created in a server.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                const ownerId = interaction.customId.split(':')[2];
+                if (!ownerId) return;
+                if (interaction.user.id !== ownerId) {
+                    try { await interaction.reply({ content: 'This reaction role modal is not for you.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                const me = interaction.guild.members.me;
+                if (!me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)) {
+                    await securityLogger.logPermissionDenied(interaction, 'rrcreate', 'Bot missing Manage Roles');
+                    try { await interaction.reply({ content: 'I need the Manage Roles permission.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                if (!interaction.member.permissions?.has(PermissionsBitField.Flags.ManageRoles)) {
+                    await securityLogger.logPermissionDenied(interaction, 'rrcreate', 'User missing Manage Roles');
+                    try { await interaction.reply({ content: 'You need Manage Roles to create reaction roles.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+
+                await interaction.deferReply({ ephemeral: true });
+
+                let title = '';
+                let description = '';
+                let image = '';
+                let placeholder = '';
+                let optionsRaw = '';
+                try { title = (interaction.fields.getTextInputValue('rr:title') || '').trim(); } catch (_) {}
+                try { description = (interaction.fields.getTextInputValue('rr:description') || '').trim(); } catch (_) {}
+                try { image = (interaction.fields.getTextInputValue('rr:image') || '').trim(); } catch (_) {}
+                try { placeholder = (interaction.fields.getTextInputValue('rr:placeholder') || '').trim(); } catch (_) {}
+                try { optionsRaw = (interaction.fields.getTextInputValue('rr:options') || '').trim(); } catch (_) {}
+
+                const lines = optionsRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                const parsed = [];
+                const errors = [];
+
+                for (const line of lines) {
+                    if (parsed.length >= 25) break;
+                    const parts = line.split('|').map(p => p.trim());
+                    const roleStr = parts[0] || '';
+                    const labelStr = parts[1] || '';
+                    const descStr = parts[2] || '';
+                    const emojiStr = parts[3] || '';
+
+                    const roleId = parseRoleId(roleStr);
+                    if (!roleId) {
+                        errors.push(`Invalid role (use a role mention or role ID): ${line}`);
+                        continue;
+                    }
+                    if (roleId === interaction.guildId) {
+                        errors.push('You cannot use @everyone.');
+                        continue;
+                    }
+                    if (parsed.some(o => o.roleId === roleId)) continue;
+
+                    // eslint-disable-next-line no-await-in-loop
+                    const role = interaction.guild.roles.cache.get(roleId) || (await interaction.guild.roles.fetch(roleId).catch(() => null));
+                    if (!role) {
+                        errors.push(`Role not found: ${roleId}`);
+                        continue;
+                    }
+                    if (role.managed) {
+                        errors.push(`Role is managed and cannot be assigned: ${role.name}`);
+                        continue;
+                    }
+                    if (me.roles.highest.comparePositionTo(role) <= 0) {
+                        errors.push(`My role must be higher than: ${role.name}`);
+                        continue;
+                    }
+
+                    const label = (labelStr || role.name).slice(0, 100);
+                    const desc = descStr ? descStr.slice(0, 100) : undefined;
+                    const emoji = emojiStr ? parseEmoji(emojiStr) : undefined;
+
+                    parsed.push({
+                        roleId,
+                        value: roleId,
+                        label,
+                        description: desc,
+                        emoji,
+                    });
+                }
+
+                if (!parsed.length) {
+                    const hint = 'Enter options as one per line: `@Role | Label | Description | Emoji` (label/desc/emoji optional).';
+                    await interaction.editReply({ content: `No valid options found.\n${hint}${errors.length ? `\n\nErrors:\n- ${errors.join('\n- ')}` : ''}` });
+                    return;
+                }
+
+                const embed = new EmbedBuilder();
+                try {
+                    const { applyDefaultColour } = require('../utils/guildColourStore');
+                    applyDefaultColour(embed, interaction.guildId);
+                } catch (_) {
+                    embed.setColor(0x5865f2);
+                }
+
+                if (title) embed.setTitle(title.slice(0, 256));
+                if (description) embed.setDescription(description.slice(0, 4096));
+                const safeImage = sanitiseUrl(image);
+                if (safeImage) embed.setImage(safeImage);
+
+                const storedPanel = reactionRoleStore.createPanel(interaction.guildId, {
+                    creatorId: interaction.user.id,
+                    channelId: interaction.channelId,
+                    embed: {
+                        title: title || null,
+                        description: description || null,
+                        image: safeImage || null,
+                    },
+                    placeholder: placeholder || 'Choose your roles',
+                    options: parsed,
+                });
+
+                const menu = new StringSelectMenuBuilder()
+                    .setCustomId(`rr:panel:${storedPanel.id}`)
+                    .setPlaceholder(storedPanel.placeholder || 'Choose your roles')
+                    .setMinValues(0)
+                    .setMaxValues(Math.min(storedPanel.options.length, 25))
+                    .addOptions(storedPanel.options.map(o => ({
+                        label: o.label,
+                        value: o.value,
+                        description: o.description,
+                        emoji: o.emoji,
+                    })));
+
+                const row = new ActionRowBuilder().addComponents(menu);
+
+                try {
+                    const msg = await interaction.channel.send({ embeds: [embed], components: [row] });
+                    reactionRoleStore.setPanelMessage(interaction.guildId, storedPanel.id, interaction.channelId, msg.id);
+                    const url = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${msg.id}`;
+                    await interaction.editReply({ content: `Reaction role menu posted.\n${url}${errors.length ? `\n\nWarnings:\n- ${errors.join('\n- ')}` : ''}` });
+                } catch (err) {
+                    console.error('Failed to post reaction role panel:', err);
+                    reactionRoleStore.removePanel(interaction.guildId, storedPanel.id);
+                    await interaction.editReply({ content: 'Failed to post the reaction role menu in this channel. Check my permissions and try again.' });
+                }
+                return;
+            }
             if (typeof interaction.customId === 'string' && interaction.customId.startsWith('openpoll:submit:')) {
                 if (!interaction.inGuild()) {
                     try { await interaction.reply({ content: 'Polls can only be used in a server.', ephemeral: true }); } catch (_) {}
