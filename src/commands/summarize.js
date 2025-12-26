@@ -57,10 +57,10 @@ module.exports = {
     .setDescription('Summarize the last N messages in this channel (bullets + paragraph)')
     .addIntegerOption(opt =>
       opt.setName('count')
-        .setDescription('How many recent messages to analyze (max 300)')
+        .setDescription('How many recent messages to analyze (max 1500)')
         .setRequired(false)
         .setMinValue(1)
-        .setMaxValue(300)
+        .setMaxValue(1500)
     )
     .addStringOption(opt =>
       opt.setName('length')
@@ -104,8 +104,8 @@ module.exports = {
       return interaction.editReply('This command can only run in a text channel or thread.');
     }
 
-    // Fetch recent messages, up to 1000 with pagination
-    const target = Math.min(300, Math.max(1, count));
+    // Fetch recent messages with pagination (Discord fetch limit is 100 per request)
+    const target = Math.min(1500, Math.max(1, count));
     let collected = [];
     let before;
     try {
@@ -167,6 +167,7 @@ module.exports = {
       const lengthInstruction = SUMMARY_LENGTH_PROMPTS[lengthPref] || SUMMARY_LENGTH_PROMPTS.medium;
       const systemPrompt = [
         'You are a concise summarization assistant.',
+        'Attribute key points to speakers using the name before the colon in the transcript (e.g. "Alice:"). Include names in both the bullets and paragraph when referring to specific ideas, questions, or decisions; if attribution is unclear, omit names rather than guessing.',
         'Output must begin with "Bulleted Summary:" followed by bullet lines that start with "-" and no additional text on that heading line.',
         'After the bullet section, include a blank line and then "Paragraph Summary:" followed by a short paragraph.',
         'Do not invent headings beyond those two and focus only on the most important information.',
