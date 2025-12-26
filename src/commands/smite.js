@@ -129,11 +129,11 @@ module.exports = {
       return interaction.editReply({ content: "I can't timeout that member due to role hierarchy or permissions." });
     }
 
-    const requesterHigher = interaction.member.roles.highest.comparePositionTo(targetMember.roles.highest) > 0
+    const requesterNotLower = interaction.member.roles.highest.comparePositionTo(targetMember.roles.highest) >= 0
       || interaction.guild.ownerId === interaction.user.id;
-    if (!requesterHigher) {
-      await securityLogger.logHierarchyViolation(interaction, 'stfu', targetMember, 'Requester lower or equal to target');
-      return interaction.editReply({ content: "You can't timeout someone with an equal or higher role." });
+    if (!requesterNotLower) {
+      await securityLogger.logHierarchyViolation(interaction, 'stfu', targetMember, 'Requester lower than target');
+      return interaction.editReply({ content: "You can't timeout someone with a higher role." });
     }
 
     const durationInput = interaction.options.getInteger('duration');
