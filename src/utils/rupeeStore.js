@@ -148,6 +148,22 @@ function getProgress(guildId, userId) {
   };
 }
 
+function listUserBalances(guildId, options = {}) {
+  if (!guildId) return [];
+  const minTokens = Number.isFinite(options.minTokens) ? options.minTokens : 1;
+  const store = loadStore();
+  const guild = store?.guilds?.[guildId];
+  const users = guild?.users && typeof guild.users === 'object' ? guild.users : {};
+
+  return Object.entries(users)
+    .map(([userId, rec]) => {
+      const tokens = Number.isFinite(rec?.tokens) ? Math.floor(rec.tokens) : 0;
+      return { userId, tokens };
+    })
+    .filter(entry => entry.tokens >= minTokens)
+    .sort((a, b) => (b.tokens - a.tokens) || String(a.userId).localeCompare(String(b.userId)));
+}
+
 module.exports = {
   AWARD_THRESHOLD,
   incrementMessage,
@@ -155,4 +171,5 @@ module.exports = {
   addTokens,
   getBalance,
   getProgress,
+  listUserBalances,
 };

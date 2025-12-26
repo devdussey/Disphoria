@@ -6,8 +6,6 @@ const rupeeStore = require('../src/utils/rupeeStore');
 
 function createInteraction({ isAdmin }) {
   let reply;
-  const target = { id: 'target', username: 'Target' };
-
   return {
     inGuild: () => true,
     guildId: 'guild',
@@ -16,9 +14,6 @@ function createInteraction({ isAdmin }) {
         has: () => isAdmin,
       },
     },
-    options: {
-      getUser: () => target,
-    },
     deferReply: () => Promise.resolve(),
     reply: (data) => {
       reply = data;
@@ -26,7 +21,13 @@ function createInteraction({ isAdmin }) {
     },
     editReply: (data) => {
       reply = data;
-      return Promise.resolve(data);
+      // mimic discord.js returning a Message-like object for component collectors
+      return Promise.resolve({
+        ...data,
+        createMessageComponentCollector: () => ({
+          on: () => {},
+        }),
+      });
     },
     getReply: () => reply,
   };
@@ -39,14 +40,12 @@ test('viewrupees denies non-admins', async () => {
   assert.equal(reply.content, 'Only server administrators can use this command.');
 });
 
-test('viewrupees shows rupee balance and progress for admins', async () => {
-  const originalGetProgress = rupeeStore.getProgress;
-  rupeeStore.getProgress = () => ({
-    totalMessages: 1234,
-    tokens: 3,
-    progress: 20,
-    messagesUntilNext: rupeeStore.AWARD_THRESHOLD - 20,
-  });
+test('viewrupees shows rupee leaderboard for admins', async () => {
+  const originalList = rupeeStore.listUserBalances;
+  rupeeStore.listUserBalances = () => ([
+    { userId: 'u2', tokens: 5 },
+    { userId: 'u1', tokens: 2 },
+  ]);
 
   try {
     const interaction = createInteraction({ isAdmin: true });
@@ -58,18 +57,31 @@ test('viewrupees shows rupee balance and progress for admins', async () => {
     assert(embedBuilder, 'expected an embed in the viewrupees response');
 
     const embed = typeof embedBuilder.toJSON === 'function' ? embedBuilder.toJSON() : embedBuilder;
-    assert.equal(embed.title, 'Rupee Balance');
-    assert.match(embed.description, /<@target> has \*\*3\*\* rupees\./);
+    assert.equal(embed.title, 'Rupee Balances');
+    assert.match(embed.description, /Users with rupees: \*\*2\*\*/);
 
-    const progressField = embed.fields.find(f => f.name === 'Progress');
-    assert(progressField, 'expected a progress field');
-    assert.match(progressField.value, new RegExp(`20\\/${rupeeStore.AWARD_THRESHOLD}`));
-
-    const nextField = embed.fields.find(f => f.name === 'Next Rupee In');
-    assert(nextField, 'expected a next field');
-    assert.match(nextField.value, /\d+ messages?/);
+    const leaderboardField = embed.fields.find(f => f.name === 'Leaderboard');
+    assert(leaderboardField, 'expected leaderboard field');
+    assert.match(leaderboardField.value, /1\. <@u2> — \*\*5\*\* rupees/);
+    assert.match(leaderboardField.value, /2\. <@u1> — \*\*2\*\* rupees/);
   } finally {
-    rupeeStore.getProgress = originalGetProgress;
+    rupeeStore.listUserBalances = originalList;
   }
 });
 
+test('viewrupees shows pager when more than 20 users have rupees', async () => {
+  const originalList = rupeeStore.listUserBalances;
+  rupeeStore.listUserBalances = () => Array.from({ length: 21 }, (_, i) => ({
+    userId: `u${i + 1}`,
+    tokens: 1,
+  }));
+
+  try {
+    const interaction = createInteraction({ isAdmin: true });
+    await viewrupees.execute(interaction);
+    const reply = interaction.getReply();
+    assert(reply.components?.length, 'expected pager components');
+  } finally {
+    rupeeStore.listUserBalances = originalList;
+  }
+});
