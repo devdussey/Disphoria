@@ -1,8 +1,6 @@
 const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const fetch = globalThis.fetch;
-const FormData = globalThis.FormData;
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY;
-const UNSCREEN_API_KEY = process.env.UNSCREEN_API_KEY || process.env.REMOVE_BG_GIF_API_KEY;
 const premiumManager = require('../utils/premiumManager');
 const removeBgUsageStore = require('../utils/removeBgUsageStore');
 
@@ -74,8 +72,8 @@ async function handleImage(interaction) {
 }
 
 async function handleGif(interaction) {
-    if (!UNSCREEN_API_KEY) {
-        await interaction.editReply('Unscreen API key is not configured. Set UNSCREEN_API_KEY in your environment.');
+    if (!REMOVE_BG_API_KEY) {
+        await interaction.editReply('RemoveBG API key is not configured. Set REMOVE_BG_API_KEY in your environment.');
         return;
     }
 
@@ -98,19 +96,18 @@ async function handleGif(interaction) {
     }
 
     console.log(`[removebg] gifUrl=${gifUrl}`);
-    const form = new FormData();
-    form.append('video_url', gifUrl);
-    form.append('format', 'gif');
-
-    const response = await fetch('https://api.unscreen.com/v1.0/videos', {
+    const response = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
-        headers: { 'X-Api-Key': UNSCREEN_API_KEY },
-        body: form,
+        headers: { 'X-Api-Key': REMOVE_BG_API_KEY },
+        body: new URLSearchParams({
+            image_url: gifUrl,
+            size: 'auto',
+        }),
     });
 
     if (!response.ok) {
         const text = await response.text().catch(() => '');
-        let message = 'Unscreen API error';
+        let message = 'RemoveBG API error';
         try {
             const data = JSON.parse(text);
             message = data?.errors?.[0]?.title || data?.errors?.[0]?.detail || data?.error || message;
@@ -120,16 +117,15 @@ async function handleGif(interaction) {
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    const contentType = (response.headers.get('content-type') || '').toLowerCase();
-    const extension = contentType.includes('zip') ? 'zip' : 'gif';
-    const attachment = new AttachmentBuilder(buffer, { name: `no-bg.${extension}` });
-    await interaction.editReply({ content: 'GIF background removed:', files: [attachment] });
+    // remove.bg returns a PNG for GIFs; surface that in the message.
+    const attachment = new AttachmentBuilder(buffer, { name: 'no-bg.png' });
+    await interaction.editReply({ content: 'GIF processed (output is a PNG without the background):', files: [attachment] });
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('removebg')
-        .setDescription('Remove the background from an image or GIF')
+        .setDescription('Remove the background from an image or GIF (GIF returns PNG)')
         .addSubcommand(sub =>
             sub
                 .setName('image')
