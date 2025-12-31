@@ -1,5 +1,9 @@
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, parseEmoji } = require('discord.js');
+const sharp = require('sharp');
 const fetch = globalThis.fetch;
+
+const MAX_DIMENSION = 8192;
+const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 
 // ----- Unicode emoji helpers (Twemoji) -----
 function cpArray(str) {
@@ -77,18 +81,18 @@ function unicodeEmojiToTwemojiUrl(input) {
 
 function parseEmojiInput(input) {
   if (!input) return null;
-  // <a:name:id> or <:name:id>
-  const mention = input.match(/^<(?:(a):)?([a-zA-Z0-9_]{2,32}):([0-9]{15,25})>$/);
-  if (mention) {
-    return { id: mention[3], name: mention[2], animated: Boolean(mention[1]), explicitUrl: null };
+
+  const parsed = parseEmoji(input);
+  if (parsed?.id) {
+    return { id: parsed.id, name: parsed.name, animated: Boolean(parsed.animated), explicitUrl: null };
   }
-  // CDN URL
-  const urlMatch = input.match(/discord(?:app)?\.com\/emojis\/([0-9]{15,25})\.(png|webp|gif)/i);
+
+  const urlMatch = input.match(/https?:\/\/(?:media\.|cdn\.)?discord(?:app)?\.com\/emojis\/([0-9]{15,25})\.(png|webp|gif)/i);
   if (urlMatch) {
     const ext = urlMatch[2].toLowerCase();
-    return { id: urlMatch[1], name: undefined, animated: ext === 'gif', explicitUrl: input };
+    return { id: urlMatch[1], name: undefined, animated: ext === 'gif', explicitUrl: urlMatch[0] };
   }
-  // Raw ID
+
   const idMatch = input.match(/^([0-9]{15,25})$/);
   if (idMatch) return { id: idMatch[1], name: undefined, animated: false, explicitUrl: null };
   return null;
@@ -127,16 +131,89 @@ async function fetchStickerBufferByIdOrUrl(idOrUrl) {
   return null;
 }
 
+function extractStickerMention(input) {
+  if (!input) return null;
+  const match = input.match(/^<(?:(a):)?([a-zA-Z0-9_]{2,32}):([0-9]{15,25})>$/);
+  if (!match) return null;
+  return { id: match[3], name: match[2], animated: Boolean(match[1]) };
+}
+
+function pickOutputExtension(format) {
+  const fmt = (format || '').toLowerCase();
+  if (fmt === 'gif') return 'gif';
+  if (fmt === 'webp') return 'webp';
+  if (fmt === 'jpeg' || fmt === 'jpg') return 'jpg';
+  return 'png';
+}
+
+function inferExtensionFromUrl(url, fallback = 'png') {
+  if (!url) return fallback;
+  const match = url.match(/\.([a-z0-9]+)(?:\?.*)?$/i);
+  if (match) return match[1].toLowerCase();
+  return fallback;
+}
+
+function deriveBaseName(input, fallback = 'media') {
+  if (!input) return fallback;
+  try {
+    const url = new URL(input);
+    const pathname = url.pathname.split('/').filter(Boolean).pop();
+    if (pathname) return pathname.split('.').shift() || fallback;
+  } catch (_) {
+    // Not a URL, fall back to simple parsing
+  }
+  const name = input.split('/').pop();
+  if (name) return name.split('.').shift() || fallback;
+  return fallback;
+}
+
+async function upscaleMedia(buffer, scale) {
+  const image = sharp(buffer, { animated: true });
+  const metadata = await image.metadata();
+  if (!metadata.width || !metadata.height) {
+    throw new Error('Could not read the image dimensions');
+  }
+
+  const targetWidth = Math.round(metadata.width * scale);
+  const targetHeight = Math.round(metadata.height * scale);
+  const width = Math.max(1, Math.min(targetWidth, MAX_DIMENSION));
+  const height = Math.max(1, Math.min(targetHeight, MAX_DIMENSION));
+
+  let pipeline = image.resize({ width, height, fit: 'inside', withoutEnlargement: false });
+  let outputExt = pickOutputExtension(metadata.format);
+
+  switch (outputExt) {
+    case 'gif':
+      pipeline = pipeline.gif({ reoptimise: false });
+      break;
+    case 'webp':
+      pipeline = pipeline.webp({ quality: 100 });
+      break;
+    case 'jpg':
+      pipeline = pipeline.jpeg({ quality: 95, progressive: true });
+      break;
+    case 'png':
+    default:
+      pipeline = pipeline.png({ compressionLevel: 8 });
+      outputExt = 'png';
+      break;
+  }
+
+  const outBuffer = await pipeline.toBuffer();
+  const capped = width !== targetWidth || height !== targetHeight;
+  return { buffer: outBuffer, width, height, outputExt, capped, targetWidth, targetHeight };
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('enlarge')
-    .setDescription('Enlarge an emoji or sticker and post it as an image')
+    .setDescription('Enlarge an emoji, sticker, or image and post it as an attachment')
     .addSubcommand(sub =>
       sub
         .setName('emoji')
         .setDescription('Enlarge a custom emoji by mention, ID, or URL')
         .addStringOption(opt =>
-          opt.setName('input').setDescription('Emoji <:name:id>, ID, or CDN URL').setRequired(true)
+          opt.setName('input').setDescription('Emoji <:name:id>, ID, or CDN/emoji URL').setRequired(true)
         )
         .addIntegerOption(opt =>
           opt.setName('size')
@@ -157,10 +234,31 @@ module.exports = {
         .setName('sticker')
         .setDescription('Enlarge a sticker by ID, URL, or file')
         .addStringOption(opt =>
-          opt.setName('id_or_url').setDescription('Sticker ID or CDN URL').setRequired(false)
+          opt.setName('id_or_url').setDescription('Sticker ID, mention, or CDN URL').setRequired(false)
         )
         .addAttachmentOption(opt =>
           opt.setName('file').setDescription('Sticker file (PNG/APNG/JSON)').setRequired(false)
+        )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('media')
+        .setDescription('Enlarge an image or GIF by 2x, 4x, or 8x')
+        .addAttachmentOption(opt =>
+          opt.setName('file').setDescription('Image or GIF attachment').setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt.setName('url').setDescription('Direct image/GIF link or media CDN URL').setRequired(false)
+        )
+        .addIntegerOption(opt =>
+          opt.setName('scale')
+            .setDescription('Upscale factor')
+            .addChoices(
+              { name: '2x', value: 2 },
+              { name: '4x', value: 4 },
+              { name: '8x', value: 8 },
+            )
+            .setRequired(false)
         )
     ),
 
@@ -193,17 +291,29 @@ module.exports = {
         unicodeFallback = unicodeEmojiToTwemojiUrl(input);
       }
       if (!parsed && !unicodeFallback) {
-        const msg = 'Provide a custom emoji mention like <:name:id>, an emoji ID, a valid CDN URL, or a Unicode emoji (😀, 👩‍💻, etc.).';
+        const msg = 'Provide a custom emoji mention like <:name:id>, an emoji ID, a copied emoji link, or a Unicode emoji.';
         if (acknowledged) return interaction.editReply({ content: msg });
         if (channelMsg) return channelMsg.edit(msg);
         return;
       }
 
-      const url = unicodeFallback ? unicodeFallback.url : (parsed.explicitUrl || emojiCdnUrl(parsed.id, parsed.animated, size));
-      const fileName = unicodeFallback ? unicodeFallback.name : `${parsed.name || parsed.id}.${parsed.animated ? 'gif' : 'png'}`;
+      let url = unicodeFallback ? unicodeFallback.url : (parsed.explicitUrl || emojiCdnUrl(parsed.id, parsed.animated, size));
+      let fileName = unicodeFallback ? unicodeFallback.name : `${parsed.name || parsed.id}.${parsed.animated ? 'gif' : 'png'}`;
 
       try {
-        const res = await fetch(url);
+        let res = await fetch(url);
+        if (!res.ok && !unicodeFallback && parsed?.id) {
+          // Try the opposite animation state in case the provided info was incomplete.
+          const altAnimated = !parsed.animated;
+          const altUrl = emojiCdnUrl(parsed.id, altAnimated, size);
+          const altRes = await fetch(altUrl);
+          if (altRes.ok) {
+            res = altRes;
+            url = altUrl;
+            fileName = `${parsed.name || parsed.id}.${altAnimated ? 'gif' : 'png'}`;
+          }
+        }
+
         if (!res.ok) throw new Error('Download failed');
         const buf = Buffer.from(await res.arrayBuffer());
         const attachment = new AttachmentBuilder(buf, { name: fileName });
@@ -219,7 +329,9 @@ module.exports = {
     }
 
     if (sub === 'sticker') {
-      const idOrUrl = interaction.options.getString('id_or_url');
+      const rawIdOrUrl = interaction.options.getString('id_or_url');
+      const mention = extractStickerMention(rawIdOrUrl);
+      const idOrUrl = mention?.id || rawIdOrUrl;
       const file = interaction.options.getAttachment('file');
 
       let buffer = null;
@@ -236,7 +348,7 @@ module.exports = {
           buffer = result.buffer;
           urlUsed = result.sourceUrl;
         } else {
-          const msg = 'Provide a sticker ID/URL or attach a sticker file.';
+          const msg = 'Provide a sticker mention/ID/link or attach a sticker file.';
           if (acknowledged) return interaction.editReply({ content: msg });
           if (channelMsg) return channelMsg.edit(msg);
           return;
@@ -249,12 +361,73 @@ module.exports = {
       }
 
       // Guess extension from URL if possible
-      const guessedExt = (urlUsed && (urlUsed.match(/\.([a-z0-9]+)(?:\?.*)?$/i)?.[1] || 'png')) || 'png';
+      const guessedExt = inferExtensionFromUrl(urlUsed, 'png');
       const attachment = new AttachmentBuilder(buffer, { name: `sticker.${guessedExt}` });
       const responseContent = 'Here is the enlarged sticker.';
       if (acknowledged) return interaction.editReply({ content: responseContent, files: [attachment] });
       if (channelMsg) return channelMsg.edit({ content: responseContent, files: [attachment] });
       return;
+    }
+
+    if (sub === 'media') {
+      const attachmentInput = interaction.options.getAttachment('file');
+      const urlInput = interaction.options.getString('url');
+      const chosenScale = interaction.options.getInteger('scale') ?? 2;
+      const scale = [2, 4, 8].includes(chosenScale) ? chosenScale : 2;
+
+      const sourceUrl = attachmentInput?.url || urlInput;
+      if (!sourceUrl) {
+        const msg = 'Attach an image/GIF or provide a direct link to enlarge.';
+        if (acknowledged) return interaction.editReply({ content: msg });
+        if (channelMsg) return channelMsg.edit(msg);
+        return;
+      }
+
+      if (!attachmentInput && !/^https?:\/\//i.test(sourceUrl)) {
+        const msg = 'Please provide a valid http/https URL for the media.';
+        if (acknowledged) return interaction.editReply({ content: msg });
+        if (channelMsg) return channelMsg.edit(msg);
+        return;
+      }
+
+      if (attachmentInput?.contentType && !attachmentInput.contentType.startsWith('image/')) {
+        const msg = 'Please attach an image or GIF file.';
+        if (acknowledged) return interaction.editReply({ content: msg });
+        if (channelMsg) return channelMsg.edit(msg);
+        return;
+      }
+
+      try {
+        const res = await fetch(sourceUrl);
+        if (!res.ok) throw new Error(`Download failed (${res.status})`);
+        const arrayBuf = await res.arrayBuffer();
+        const buf = Buffer.from(arrayBuf);
+        if (!buf.length) throw new Error('Downloaded file was empty');
+        if (buf.length > MAX_MEDIA_BYTES) throw new Error('File is too large to enlarge (25 MB limit).');
+
+        const { buffer: upscaled, width, height, outputExt, capped, targetWidth, targetHeight } = await upscaleMedia(buf, scale);
+        if (upscaled.length > MAX_MEDIA_BYTES) {
+          throw new Error('Upscaled file is too large to send (over 25 MB). Try a smaller scale.');
+        }
+        const baseName = attachmentInput?.name ? deriveBaseName(attachmentInput.name) : deriveBaseName(sourceUrl);
+        const fileName = `${baseName || 'media'}-${scale}x.${outputExt}`;
+        const attachment = new AttachmentBuilder(upscaled, { name: fileName });
+
+        const parts = [
+          `Enlarged to ${width}x${height} (${scale}x).`,
+        ];
+        if (capped) parts.push(`Requested ${targetWidth}x${targetHeight} but capped at ${MAX_DIMENSION}px edges.`);
+
+        const content = parts.join(' ');
+        if (acknowledged) return interaction.editReply({ content, files: [attachment] });
+        if (channelMsg) return channelMsg.edit({ content, files: [attachment] });
+        return;
+      } catch (err) {
+        const msg = `Could not enlarge that media: ${err.message}`;
+        if (acknowledged) return interaction.editReply({ content: msg });
+        if (channelMsg) return channelMsg.edit(msg);
+        return;
+      }
     }
 
     const fallback = 'Unknown subcommand.';

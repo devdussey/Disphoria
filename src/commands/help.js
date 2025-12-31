@@ -51,7 +51,7 @@ const categories = {
     { cmd: '/transcribe', desc: 'Transcribe an attached audio file using Whisper', perm: null },
     { cmd: '/removebg', desc: 'Remove the background from an image via remove.bg (2 free uses/day without Premium)', perm: 'Premium for unlimited access' },
     { cmd: '/imageresize', desc: 'Resize an image and convert it to PNG', perm: null },
-    { cmd: '/enlarge emoji/sticker', desc: 'Post a large version of any emoji or sticker', perm: null },
+    { cmd: '/enlarge emoji/sticker/media', desc: 'Post a large version of any emoji, sticker, or image/GIF (2x/4x/8x)', perm: null },
     { cmd: '/clone emoji/sticker', desc: 'Clone emojis or stickers by mention, ID, URL, or upload', perm: 'Manage Emojis and Stickers' },
     { cmd: '/cloneall', desc: 'Bulk clone emojis from another server with filters', perm: 'Manage Emojis and Stickers ┬╖ Premium' },
     { cmd: '/font', desc: 'Transform your message with decorative Unicode fonts', perm: null },
