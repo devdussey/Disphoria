@@ -277,7 +277,7 @@ async function runWraithStart(interaction, member, options) {
 
   const stopAt = durationMs ? Date.now() + durationMs : null;
   let sent = 0;
-  const text = customMsg || 'Your isolation has begun.';
+  const text = (customMsg && customMsg.trim()) || `<@${member.id}>`;
   const record = { channelId: channel.id, intervalId: null, stopAt, hiddenOverwrites };
 
   const createEmbed = (count) => new EmbedBuilder()
@@ -289,7 +289,8 @@ async function runWraithStart(interaction, member, options) {
 
   const sendOne = async (count) => {
     try {
-      await channel.send({ content: `<@${member.id}> ${text}`.slice(0, 2000), embeds: [createEmbed(count)] });
+      const content = text.includes(`<@${member.id}>`) ? text : `<@${member.id}> ${text}`;
+      await channel.send({ content: content.slice(0, 2000), embeds: [createEmbed(count)] });
     } catch (_) { /* ignore send errors during loop */ }
   };
 
