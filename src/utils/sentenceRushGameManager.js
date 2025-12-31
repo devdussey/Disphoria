@@ -6,13 +6,16 @@ const {
   escapeMarkdown,
 } = require('discord.js');
 const sentenceRushStatsStore = require('./sentenceRushStatsStore');
+const sentenceRushConfigStore = require('./sentenceRushConfigStore');
 const sentencePool = require('./sentenceRushSentences');
 const { resolveEmbedColour } = require('./guildColourStore');
 
 const JOIN_WINDOW_MS = 30_000;
 const MIN_PLAYERS = 1;
 const MAX_PLAYERS = 6;
-const TURN_SECONDS = 20;
+const DEFAULT_TURN_SECONDS = 20;
+const MIN_TURN_SECONDS = 5;
+const MAX_TURN_SECONDS = 30;
 
 const activeGames = new Map();
 
@@ -30,18 +33,32 @@ function normalizeText(input) {
 
 const SENTENCES = Array.isArray(sentencePool)
   ? sentencePool
-    .map(sentence => normalizeText(sentence))
-    .filter(sentence => {
-      if (!sentence) return false;
-      const words = sentence.split(' ').filter(Boolean);
-      return words.length >= 3 && words.length <= 8;
+    .map(sentence => {
+      const original = String(sentence || '').trim();
+      const normalized = normalizeText(original);
+      if (!normalized) return null;
+      const words = normalized.split(' ').filter(Boolean);
+      if (words.length < 3 || words.length > 8) return null;
+      return { original: original || normalized, normalized, wordCount: words.length };
     })
+    .filter(Boolean)
   : [];
 
-function pickSentence() {
+function clampInt(value, min, max, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  const rounded = Math.round(num);
+  return Math.max(min, Math.min(max, rounded));
+}
+
+function pickSentence(minWords, maxWords) {
   if (!SENTENCES.length) return null;
-  const index = Math.floor(Math.random() * SENTENCES.length);
-  return SENTENCES[index];
+  const min = clampInt(minWords, 3, 8, 3);
+  const max = clampInt(maxWords, min, 8, 8);
+  const candidates = SENTENCES.filter(entry => entry.wordCount >= min && entry.wordCount <= max);
+  if (!candidates.length) return null;
+  const index = Math.floor(Math.random() * candidates.length);
+  return candidates[index];
 }
 
 function getActiveGame(guildId, channelId) {
@@ -99,7 +116,7 @@ function buildLobbyEmbed(game, joinDeadline) {
         name: 'Rules',
         value: 'Take turns guessing the hidden sentence. Correct letters in the right position reveal for everyone. Correct letters in the wrong position appear in **bold** in the last guess.',
       },
-      { name: 'Settings', value: `Turn timer: **${TURN_SECONDS}s**` },
+      { name: 'Settings', value: `Turn timer: **${game.turnSeconds}s**` },
     );
 }
 
@@ -205,7 +222,7 @@ function buildGameEmbed(game) {
       { name: `Players (${game.players.length}/${MAX_PLAYERS})`, value: formatRoster(game) },
       {
         name: 'Turn',
-        value: game.currentTurnUserId ? `<@${game.currentTurnUserId}> (${TURN_SECONDS}s)` : 'Starting...',
+        value: game.currentTurnUserId ? `<@${game.currentTurnUserId}> (${game.turnSeconds}s)` : 'Starting...',
         inline: true,
       },
       { name: 'Hints', value: String(game.hintsGiven || 0), inline: true },
@@ -222,7 +239,7 @@ function buildGameEmbed(game) {
 
 async function waitForTurnGuess(game, userId) {
   const channel = game.channel;
-  const turnMs = TURN_SECONDS * 1000;
+  const turnMs = game.turnSeconds * 1000;
 
   if (!channel || typeof channel.createMessageCollector !== 'function') {
     return { ok: false, reason: 'channel-not-collectable' };
@@ -335,11 +352,11 @@ async function runSentenceRushGame(game) {
   game.stage = 'playing';
   game.startedPlayerIds = Array.from(game.playerSet);
 
-  await lobbyMessage.edit({
-    embeds: [buildGameEmbed(game)],
-    components: [],
-    allowedMentions: { parse: [] },
-  }).catch(() => {});
+    await lobbyMessage.edit({
+      embeds: [buildGameEmbed(game)],
+      components: [],
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
 
   if (game.players.length < MIN_PLAYERS) {
     await lobbyMessage.edit({
@@ -374,13 +391,9 @@ async function runSentenceRushGame(game) {
 
     game.currentTurnUserId = userId;
 
-    await lobbyMessage.edit({
-      embeds: [buildGameEmbed(game)],
-      allowedMentions: { parse: [] },
-    }).catch(() => {});
-
     await game.channel.send({
-      content: `<@${userId}> it is your turn. You have ${TURN_SECONDS}s to guess the sentence.`,
+      content: `<@${userId}> it is your turn. You have ${game.turnSeconds}s to guess the sentence.`,
+      embeds: [buildGameEmbed(game)],
       allowedMentions: { users: [userId] },
     }).catch(() => {});
 
@@ -476,9 +489,10 @@ async function startSentenceRushGame(interaction) {
     return { ok: false, error: 'Unable to access this channel.' };
   }
 
-  const sentence = pickSentence();
+  const config = sentenceRushConfigStore.getConfig(guildId);
+  const sentence = pickSentence(config.minWords, config.maxWords);
   if (!sentence) {
-    return { ok: false, error: 'No sentences are available for SentenceRush.' };
+    return { ok: false, error: 'No sentences are available for SentenceRush with the current settings.' };
   }
 
   const game = {
@@ -501,9 +515,10 @@ async function startSentenceRushGame(interaction) {
     winnerId: null,
     startedPlayerIds: null,
     startedAt: Date.now(),
-    target: sentence,
-    originalSentence: sentence,
-    revealed: Array.from(sentence, ch => ch === ' '),
+    turnSeconds: clampInt(config.turnSeconds, MIN_TURN_SECONDS, MAX_TURN_SECONDS, DEFAULT_TURN_SECONDS),
+    target: sentence.normalized,
+    originalSentence: sentence.original,
+    revealed: Array.from(sentence.normalized, ch => ch === ' '),
     lastGuess: null,
     lastHint: null,
     hintsGiven: 0,
