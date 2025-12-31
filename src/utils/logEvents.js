@@ -3,6 +3,15 @@ const LOG_KEYS = {
     label: 'All Message Events',
     category: 'Message',
   },
+  media: {
+    label: 'All Media Events',
+    category: 'Media',
+  },
+  media_posted: {
+    label: 'Media Posted',
+    category: 'Media',
+    fallbackKey: 'media',
+  },
   message_create: {
     label: 'Message Created',
     category: 'Message',
@@ -213,4 +222,3 @@ module.exports = {
   listCategories,
   listKeysForCategory,
 };
-
