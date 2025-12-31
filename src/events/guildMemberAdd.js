@@ -4,6 +4,10 @@ const welcomeStore = require('../utils/welcomeStore');
 const blacklist = require('../utils/blacklistStore');
 const logSender = require('../utils/logSender');
 const inviteTracker = require('../utils/inviteTracker');
+const joinLeaveStore = require('../utils/joinLeaveStore');
+const joinTrackerStore = require('../utils/joinTrackerStore');
+const { buildJoinEmbed, formatInviteSource } = require('../utils/joinTrackerEmbed');
+const { detectVanityUse } = require('../utils/vanityUseTracker');
 const { buildLogEmbed } = require('../utils/logEmbedFactory');
 
 module.exports = {
@@ -110,9 +114,48 @@ module.exports = {
             console.error('Failed to log member join:', err);
         }
 
+        let joinStats = null;
+        try {
+            joinLeaveStore.addEvent(member.guild.id, member.id, 'join', Date.now());
+            joinStats = joinLeaveStore.getUserStats(member.guild.id, member.id);
+        } catch (err) {
+            console.error('Failed to record join stats:', err);
+        }
+
+        let vanityInfo = null;
+        try {
+            vanityInfo = await detectVanityUse(member.guild);
+        } catch (err) {
+            console.error('Failed to check vanity usage:', err);
+        }
+
+        let usedInvite = null;
+        try {
+            usedInvite = await inviteTracker.handleMemberJoin(member);
+        } catch (err) {
+            console.error('Failed to detect invite usage:', err);
+        }
+
+        try {
+            const cfg = joinTrackerStore.getConfig(member.guild.id);
+            if (cfg && cfg.enabled !== false && cfg.channelId) {
+                const channel = await member.guild.channels.fetch(cfg.channelId).catch(() => null);
+                if (channel?.isTextBased?.()) {
+                    const sourceText = formatInviteSource({ usedInvite, vanityInfo });
+                    const embed = buildJoinEmbed(member, {
+                        joinedAt: member.joinedTimestamp || Date.now(),
+                        joinCount: joinStats?.joins || 1,
+                        sourceText,
+                    });
+                    await channel.send({ embeds: [embed] });
+                }
+            }
+        } catch (err) {
+            console.error('Failed to send join tracker embed:', err);
+        }
+
         // Attempt to detect the invite used
         try {
-            const usedInvite = await inviteTracker.handleMemberJoin(member);
             if (usedInvite) {
                 const inviteEmbed = buildLogEmbed({
                     action: 'Invite Used',
