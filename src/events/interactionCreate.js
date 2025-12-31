@@ -703,8 +703,13 @@ module.exports = {
 
                 const parts = interaction.customId.split(':');
                 const ownerId = parts[2];
+                const roleId = parts[3] || null;
                 if (ownerId && interaction.user.id !== ownerId) {
                     try { await interaction.reply({ content: 'This vanity role form is not for you.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                if (!roleId) {
+                    try { await interaction.reply({ content: 'This vanity role form is missing a role. Run `/vanityrole setup` again.', ephemeral: true }); } catch (_) {}
                     return;
                 }
 
@@ -712,7 +717,7 @@ module.exports = {
 
                 try {
                     if (typeof vanityRoleCommand.handleVanityRoleModalSubmit === 'function') {
-                        await vanityRoleCommand.handleVanityRoleModalSubmit(interaction);
+                        await vanityRoleCommand.handleVanityRoleModalSubmit(interaction, roleId);
                     } else {
                         await interaction.editReply({ content: 'Vanity role setup is unavailable right now.' });
                     }

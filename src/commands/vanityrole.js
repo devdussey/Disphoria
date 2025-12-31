@@ -47,11 +47,11 @@ function pickActiveColors(rec, which) {
   return { active, primaryColor: null, secondaryColor: null };
 }
 
-async function getOrCreateVanityRole({ interaction, member, me, rec, name, colors }) {
+async function getOrCreateVanityRole({ interaction, member, me, rec, name, colors, selectedRole }) {
   const reason = `Vanity role for ${interaction.user.tag} (${interaction.user.id}) via /vanityrole`;
 
-  let role = null;
-  if (rec?.roleId) {
+  let role = selectedRole || null;
+  if (!role && rec?.roleId) {
     role = interaction.guild.roles.cache.get(rec.roleId) || null;
     if (!role) {
       try {
@@ -87,16 +87,9 @@ async function getOrCreateVanityRole({ interaction, member, me, rec, name, color
   return { role: createdRole, created: true, reason };
 }
 
-async function ensureRolePositionAboveMember({ role, member, me, reason }) {
-  let memberHighestOtherPosition = 0;
-  for (const r of member.roles.cache.values()) {
-    if (r.id === role.id) continue;
-    if (r.position > memberHighestOtherPosition) memberHighestOtherPosition = r.position;
-  }
-
-  const maxAllowed = Math.max(1, me.roles.highest.position - 1);
-  const desired = Math.max(1, Math.min(memberHighestOtherPosition + 1, maxAllowed));
-  if (role.position === desired) return { desired, maxAllowed, memberHighestOtherPosition };
+async function ensureRolePositionUnderBot({ role, me, reason }) {
+  const desired = Math.max(1, me.roles.highest.position - 1);
+  if (role.position === desired) return { desired };
 
   try {
     await role.setPosition(desired, { reason });
@@ -104,12 +97,12 @@ async function ensureRolePositionAboveMember({ role, member, me, reason }) {
     // best-effort
   }
 
-  return { desired, maxAllowed, memberHighestOtherPosition };
+  return { desired };
 }
 
-function buildVanityRoleModal(userId, rec) {
+function buildVanityRoleModal(userId, rec, roleId) {
   const modal = new ModalBuilder()
-    .setCustomId(`vanityrole:modal:${userId}`)
+    .setCustomId(`vanityrole:modal:${userId}:${roleId}`)
     .setTitle('Vanity Role Setup');
 
   const nameInput = new TextInputBuilder()
@@ -173,6 +166,29 @@ async function handleVanityRoleSetup(interaction, inputs) {
     const primaryRaw = inputs?.primary ? inputs.primary.trim() : '';
     const secondaryRaw = inputs?.secondary ? inputs.secondary.trim() : '';
     const useRaw = inputs?.use ? inputs.use.trim().toLowerCase() : '';
+    const roleId = inputs?.roleId ? String(inputs.roleId) : null;
+
+    if (!roleId) {
+      return interaction.editReply({ content: 'Select a role first with `/vanityrole setup role:@Role`.' });
+    }
+
+    if (roleId === interaction.guild.id) {
+      return interaction.editReply({ content: 'You cannot use @everyone as a vanity role.' });
+    }
+
+    let selectedRole = interaction.guild.roles.cache.get(roleId) || null;
+    if (!selectedRole) {
+      try { selectedRole = await interaction.guild.roles.fetch(roleId); } catch (_) {}
+    }
+    if (!selectedRole) {
+      return interaction.editReply({ content: 'That role no longer exists. Run `/vanityrole setup` again.' });
+    }
+    if (selectedRole.managed) {
+      return interaction.editReply({ content: 'That role is managed and cannot be used as a vanity role.' });
+    }
+    if (me.roles.highest.comparePositionTo(selectedRole) <= 0) {
+      return interaction.editReply({ content: 'My highest role must be above the selected role.' });
+    }
 
     const primaryIn = primaryRaw || null;
     const secondaryIn = secondaryRaw || null;
@@ -184,7 +200,7 @@ async function handleVanityRoleSetup(interaction, inputs) {
 
     const use = useRaw === 'secondary' ? 'secondary' : useRaw === 'primary' ? 'primary' : null;
     const merged = {
-      roleId: rec?.roleId ?? null,
+      roleId,
       primary: primaryIn ? primary : rec?.primary ?? null,
       secondary: secondaryIn ? secondary : rec?.secondary ?? null,
       active: use || rec?.active || 'primary',
@@ -202,6 +218,7 @@ async function handleVanityRoleSetup(interaction, inputs) {
       rec: merged,
       name: name || null,
       colors: picked,
+      selectedRole,
     });
 
     if (name) {
@@ -222,7 +239,7 @@ async function handleVanityRoleSetup(interaction, inputs) {
       }
     }
 
-    const pos = await ensureRolePositionAboveMember({ role, member, me, reason });
+    const pos = await ensureRolePositionUnderBot({ role, me, reason });
 
     const saved = await upsertUserRecord(interaction.guildId, interaction.user.id, {
       roleId: role.id,
@@ -243,19 +260,15 @@ async function handleVanityRoleSetup(interaction, inputs) {
       ],
     }); } catch (_) {}
 
-    const warning = (pos.desired < pos.memberHighestOtherPosition + 1)
-      ? `\nNote: I could only place it as high as possible under my highest role (max position ${pos.maxAllowed}).`
-      : '';
-
     return interaction.editReply({
-      content: `${created ? 'Created' : 'Updated'} your vanity role: ${role}.${warning}`,
+      content: `${created ? 'Created' : 'Updated'} your vanity role: ${role}.`,
     });
   } catch (err) {
     return interaction.editReply({ content: `Error: ${err.message || 'Unknown error'}` });
   }
 }
 
-async function handleVanityRoleModalSubmit(interaction) {
+async function handleVanityRoleModalSubmit(interaction, roleId) {
   const nameRaw = (interaction.fields.getTextInputValue('vanityrole:name') || '').trim();
   const primaryRaw = (interaction.fields.getTextInputValue('vanityrole:primary') || '').trim();
   const secondaryRaw = (interaction.fields.getTextInputValue('vanityrole:secondary') || '').trim();
@@ -265,6 +278,7 @@ async function handleVanityRoleModalSubmit(interaction) {
     primary: primaryRaw || null,
     secondary: secondaryRaw || null,
     use: null,
+    roleId,
   });
 }
 
@@ -277,6 +291,11 @@ module.exports = {
       sub
         .setName('setup')
         .setDescription('Open the vanity role setup form')
+        .addRoleOption(opt =>
+          opt.setName('role')
+            .setDescription('Select the role to use as your vanity role')
+            .setRequired(true)
+        )
     )
     .addSubcommand(sub =>
       sub
@@ -326,7 +345,21 @@ module.exports = {
 
     try {
       if (sub === 'setup') {
-        const modal = buildVanityRoleModal(interaction.user.id, rec);
+        const role = interaction.options.getRole('role', true);
+        if (!role) {
+          return interaction.reply({ content: 'Please select a role to continue.', ephemeral: true });
+        }
+        if (role.id === interaction.guild.id) {
+          return interaction.reply({ content: 'You cannot use @everyone as a vanity role.', ephemeral: true });
+        }
+        if (role.managed) {
+          return interaction.reply({ content: 'That role is managed and cannot be used as a vanity role.', ephemeral: true });
+        }
+        if (me.roles.highest.comparePositionTo(role) <= 0) {
+          return interaction.reply({ content: 'My highest role must be above the selected role.', ephemeral: true });
+        }
+
+        const modal = buildVanityRoleModal(interaction.user.id, rec, role.id);
         try {
           await interaction.showModal(modal);
         } catch (_) {
