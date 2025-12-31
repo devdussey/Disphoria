@@ -84,7 +84,7 @@ const categories = {
     { cmd: '/webhooks', desc: 'List every webhook in the server and its creator', perm: 'Manage Webhooks' },
   ],
   Premium: [
-    { cmd: '/wraith start/stop', desc: 'Isolate a member with relentless pings and Wraith embeds (modal setup)', perm: 'Bot Owner ┬╖ Premium' },
+    { cmd: '/wraith start/stop/preset', desc: 'Isolate a member with Wraith embeds using a modal or saved presets', perm: 'Bot Owner + Premium' },
     { cmd: '/tamperproof add/remove/list', desc: 'Monitor channels for deletion tampering alerts', perm: 'Manage Channels ┬╖ Premium' },
     { cmd: '/giverupee', desc: 'Grant Rupees directly with a Premium token', perm: 'Bot Owner or Guild Owner ┬╖ Premium' },
     { cmd: '/cloneall', desc: 'Bulk import emojis from another server', perm: 'Manage Emojis and Stickers ┬╖ Premium' },
@@ -99,7 +99,7 @@ const categories = {
     { cmd: '/fetchmessage', desc: 'Backfill user messages from a channel for analysis tools', perm: 'Bot Owner' },
     { cmd: '/dmdiag test/role', desc: 'Run DM diagnostics for a member or role', perm: 'Bot Owner' },
     { cmd: '/giverupee', desc: 'Grant Rupees directly to a user', perm: 'Bot Owner or Guild Owner ┬╖ Premium' },
-    { cmd: '/wraith start/stop', desc: 'Create a private spam channel and isolate a member (modal setup)', perm: 'Bot Owner ┬╖ Premium' },
+    { cmd: '/wraith start/stop/preset', desc: 'Create a private spam channel and reuse saved presets or the modal', perm: 'Bot Owner + Premium' },
   ],
 };
 

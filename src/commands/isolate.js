@@ -11,6 +11,7 @@ const {
 const logger = require('../utils/securityLogger');
 const { isOwner } = require('../utils/ownerIds');
 const premiumManager = require('../utils/premiumManager');
+const wraithPresetStore = require('../utils/wraithPresetStore');
 
 // In-memory store for active isolations per guild+user
 // Key: `${guildId}:${userId}` -> { channelId, intervalId, stopAt }
@@ -46,7 +47,44 @@ function parseIntInput(value) {
   return n;
 }
 
-function createWraithStartModal(ownerId, targetId) {
+function validateWraithConfigInput(raw) {
+  const message = (raw?.message || '').trim();
+  if (!message) return { error: 'Message is required.' };
+
+  const durationStr = (raw?.durationStr || '').trim();
+  if (durationStr && !parseDuration(durationStr)) {
+    return { error: "Invalid duration. Use formats like '2m', '10m', '1h' (max 15m)." };
+  }
+
+  const intervalSec = raw?.intervalSec == null ? null : Number(raw.intervalSec);
+  if (intervalSec != null && (!Number.isFinite(intervalSec) || intervalSec < 1 || intervalSec > 60)) {
+    return { error: 'Interval must be between 1 and 60 seconds.' };
+  }
+
+  const maxMessages = raw?.maxMessages == null ? null : Number(raw.maxMessages);
+  if (maxMessages != null && (!Number.isFinite(maxMessages) || maxMessages < 5 || maxMessages > 500)) {
+    return { error: 'Max messages must be between 5 and 500.' };
+  }
+
+  let hideOthers = null;
+  if (typeof raw?.hideOthers === 'boolean') {
+    hideOthers = raw.hideOthers;
+  } else if (raw?.hideOthers != null) {
+    hideOthers = !!raw.hideOthers;
+  }
+
+  return {
+    value: {
+      message: message.slice(0, 1900),
+      durationStr: durationStr || null,
+      intervalSec,
+      maxMessages,
+      hideOthers,
+    },
+  };
+}
+
+function createWraithStartModal(ownerId, targetId, preset) {
   const modal = new ModalBuilder()
     .setCustomId(`wraith:start:${ownerId}:${targetId}`)
     .setTitle('Configure Wraith');
@@ -90,6 +128,22 @@ function createWraithStartModal(ownerId, targetId) {
     .setRequired(false)
     .setMaxLength(5)
     .setPlaceholder('false');
+
+  if (preset?.message) {
+    messageInput.setValue(String(preset.message).slice(0, 1900));
+  }
+  if (preset?.durationStr) {
+    durationInput.setValue(String(preset.durationStr).slice(0, 8));
+  }
+  if (preset?.intervalSec != null) {
+    intervalInput.setValue(String(preset.intervalSec).slice(0, 3));
+  }
+  if (preset?.maxMessages != null) {
+    maxInput.setValue(String(preset.maxMessages).slice(0, 4));
+  }
+  if (typeof preset?.hideOthers === 'boolean') {
+    hideInput.setValue(String(preset.hideOthers));
+  }
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(messageInput),
@@ -281,10 +335,40 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('wraith')
     .setDescription('invoke wraith')
+    .addSubcommandGroup(group =>
+      group.setName('preset')
+        .setDescription('Manage saved wraith configurations for wraith.')
+        .addSubcommand(sub =>
+          sub.setName('save')
+            .setDescription('Save or update a preset for starting wraith.')
+            .addStringOption(opt => opt.setName('name').setDescription('Preset name (max 50 chars)').setRequired(true))
+            .addStringOption(opt => opt.setName('message').setDescription('Message to repeat (max 1900 chars)').setRequired(true))
+            .addStringOption(opt => opt.setName('duration').setDescription("Duration like '2m', '10m', '1h' (max 15m)").setRequired(false))
+            .addIntegerOption(opt => opt.setName('interval').setDescription('Interval seconds (1-60)').setMinValue(1).setMaxValue(60))
+            .addIntegerOption(opt => opt.setName('max').setDescription('Max messages (5-500)').setMinValue(5).setMaxValue(500))
+            .addBooleanOption(opt => opt.setName('hide').setDescription('Hide other channels from the member?'))
+            .addBooleanOption(opt => opt.setName('default').setDescription('Set this preset as the default for the modal?'))
+        )
+        .addSubcommand(sub =>
+          sub.setName('delete')
+            .setDescription('Delete a saved preset.')
+            .addStringOption(opt => opt.setName('name').setDescription('Preset name to delete').setRequired(true))
+        )
+        .addSubcommand(sub =>
+          sub.setName('list')
+            .setDescription('List saved presets.')
+        )
+        .addSubcommand(sub =>
+          sub.setName('default')
+            .setDescription("Set or clear the default preset (use 'none' to clear).")
+            .addStringOption(opt => opt.setName('name').setDescription("Preset name to set as default, or 'none' to clear").setRequired(true))
+        )
+    )
     .addSubcommand(sub =>
       sub.setName('start')
         .setDescription('Open a modal to configure and start a wraith isolation.')
         .addUserOption(opt => opt.setName('member').setDescription('Member to isolate').setRequired(true))
+        .addStringOption(opt => opt.setName('preset').setDescription('Use a saved preset (skips the modal).'))
     )
     .addSubcommand(sub =>
       sub.setName('stop')
@@ -306,12 +390,94 @@ module.exports = {
       return interaction.reply({ content: 'This command is restricted to bot owners.', ephemeral: true });
     }
 
+    const group = interaction.options.getSubcommandGroup(false);
+    const sub = interaction.options.getSubcommand();
+    const ownerId = interaction.user.id;
+
+    if (group === 'preset') {
+      if (sub === 'save') {
+        const presetName = (interaction.options.getString('name', true) || '').trim();
+        const message = (interaction.options.getString('message', true) || '').trim();
+        const durationStr = (interaction.options.getString('duration') || '').trim();
+        const intervalOpt = interaction.options.getInteger('interval');
+        const maxOpt = interaction.options.getInteger('max');
+        const hideOpt = interaction.options.getBoolean('hide');
+        const makeDefault = interaction.options.getBoolean('default') === true;
+
+        const validated = validateWraithConfigInput({
+          message,
+          durationStr,
+          intervalSec: intervalOpt,
+          maxMessages: maxOpt,
+          hideOthers: hideOpt,
+        });
+        if (validated.error) {
+          return interaction.reply({ content: validated.error, ephemeral: true });
+        }
+        try {
+          const saved = await wraithPresetStore.savePreset(ownerId, presetName, validated.value, makeDefault);
+          const defaultNote = makeDefault ? ' (set as default)' : '';
+          return interaction.reply({ content: `Preset '${saved.name}' saved${defaultNote}.`, ephemeral: true });
+        } catch (err) {
+          const msg = err?.message || 'Failed to save preset.';
+          return interaction.reply({ content: msg, ephemeral: true });
+        }
+      }
+
+      if (sub === 'delete') {
+        const presetName = (interaction.options.getString('name', true) || '').trim();
+        const ok = await wraithPresetStore.deletePreset(ownerId, presetName);
+        if (!ok) {
+          return interaction.reply({ content: `Preset '${presetName}' was not found.`, ephemeral: true });
+        }
+        return interaction.reply({ content: `Preset '${presetName}' deleted.`, ephemeral: true });
+      }
+
+      if (sub === 'list') {
+        const presets = wraithPresetStore.listPresets(ownerId);
+        const defaultKey = wraithPresetStore.getDefaultKey(ownerId);
+        if (!presets.length) {
+          return interaction.reply({ content: 'No presets saved. Use /wraith preset save to create one.', ephemeral: true });
+        }
+        const lines = presets.slice(0, 15).map(p => {
+          const parts = [];
+          if (p.durationStr) parts.push(`dur ${p.durationStr}`);
+          if (p.intervalSec != null) parts.push(`${p.intervalSec}s`);
+          if (p.maxMessages != null) parts.push(`${p.maxMessages} msgs`);
+          if (typeof p.hideOthers === 'boolean') parts.push(p.hideOthers ? 'hide' : 'no-hide');
+          const summary = parts.length ? ` [${parts.join(', ')}]` : '';
+          const preview = p.message.length > 60 ? `${p.message.slice(0, 60)}...` : p.message;
+          return `- ${p.name}${p.key === defaultKey ? ' (default)' : ''}: ${preview}${summary}`;
+        });
+        const more = presets.length > 15 ? `\n(+ ${presets.length - 15} more...)` : '';
+        return interaction.reply({ content: `${lines.join('\n')}${more}`, ephemeral: true });
+      }
+
+      if (sub === 'default') {
+        const nameRaw = (interaction.options.getString('name', true) || '').trim();
+        if (!nameRaw) {
+          return interaction.reply({ content: 'Provide a preset name, or "none" to clear the default.', ephemeral: true });
+        }
+        const lower = nameRaw.toLowerCase();
+        if (['none', 'clear', 'remove', 'unset'].includes(lower)) {
+          await wraithPresetStore.clearDefaultPreset(ownerId);
+          return interaction.reply({ content: 'Default preset cleared.', ephemeral: true });
+        }
+        const preset = wraithPresetStore.getPreset(ownerId, nameRaw);
+        if (!preset) {
+          return interaction.reply({ content: `Preset '${nameRaw}' was not found.`, ephemeral: true });
+        }
+        await wraithPresetStore.setDefaultPreset(ownerId, nameRaw);
+        return interaction.reply({ content: `Default preset set to '${preset.name}'.`, ephemeral: true });
+      }
+
+      return interaction.reply({ content: 'Unknown preset action.', ephemeral: true });
+    }
+
     const me = interaction.guild.members.me;
     if (!me.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
       return interaction.reply({ content: 'I need Manage Channels permission to create private channels.', ephemeral: true });
     }
-
-    const sub = interaction.options.getSubcommand();
 
     if (sub === 'start') {
       const target = interaction.options.getUser('member', true);
@@ -329,7 +495,38 @@ module.exports = {
         return interaction.reply({ content: `Already isolating <@${member.id}> in <#${existing.channelId}>. Use /wraith stop to end.`, ephemeral: true });
       }
 
-      const modal = createWraithStartModal(interaction.user.id, target.id);
+      const presetName = (interaction.options.getString('preset') || '').trim();
+      const presetFromName = presetName ? wraithPresetStore.getPreset(ownerId, presetName) : null;
+      if (presetName && !presetFromName) {
+        return interaction.reply({ content: `Preset '${presetName}' was not found. Use /wraith preset list to see saved presets.`, ephemeral: true });
+      }
+
+      if (presetFromName) {
+        const validated = validateWraithConfigInput(presetFromName);
+        if (validated.error) {
+          return interaction.reply({ content: `Preset '${presetFromName.name}' is invalid: ${validated.error}`, ephemeral: true });
+        }
+        await interaction.deferReply({ ephemeral: true });
+        await runWraithStart(interaction, member, {
+          message: validated.value.message,
+          durationStr: validated.value.durationStr,
+          intervalSec: validated.value.intervalSec ?? 5,
+          maxMessages: validated.value.maxMessages ?? 120,
+          hideOthers: validated.value.hideOthers ?? false,
+        });
+        return;
+      }
+
+      let modalPreset = null;
+      const defaultPreset = wraithPresetStore.getDefaultPreset(ownerId);
+      if (defaultPreset) {
+        const validatedDefault = validateWraithConfigInput(defaultPreset);
+        if (!validatedDefault.error) {
+          modalPreset = validatedDefault.value;
+        }
+      }
+
+      const modal = createWraithStartModal(interaction.user.id, target.id, modalPreset);
       try {
         await interaction.showModal(modal);
       } catch (_) {
