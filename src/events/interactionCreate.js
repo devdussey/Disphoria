@@ -17,6 +17,7 @@ const boosterManager = require('../utils/boosterRoleManager');
 const boosterStore = require('../utils/boosterRoleStore');
 const boosterConfigStore = require('../utils/boosterRoleConfigStore');
 const vanityRoleCommand = require('../commands/vanityrole');
+const { isOwner } = require('../utils/ownerIds');
 
 const MAX_ERROR_STACK = 3500;
 
@@ -142,6 +143,45 @@ function getCategoryLabel(key) {
     return botConfigStore.getCategoryDefinition(key)?.label || key || 'This category';
 }
 
+const OWNER_COMMANDS = new Set(['wraith']);
+const ADMIN_COMMANDS = new Set([
+    'antinuke',
+    'automessage',
+    'autorespond',
+    'autoroles',
+    'backup',
+    'backupdelete',
+    'backuplist',
+    'backupview',
+    'botconfig',
+    'botlook',
+    'botsettings',
+    'brconfig',
+    'channelsync',
+    'confessconfig',
+    'createchannel',
+    'createrole',
+    'deleterole',
+    'embed',
+    'fetchmessage',
+    'giverupee',
+    'isolate',
+    'jail',
+    'jointracker',
+    'joinstrackerleaders',
+    'leavetracker',
+    'leavetrackerleaders',
+    'logtree',
+    'logconfig',
+    'rrcreate',
+    'rrdelete',
+    'rrlist',
+    'rupeeconfig',
+    'transriptconfig',
+    'vanityrole',
+    'webhooks',
+]);
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
@@ -161,6 +201,26 @@ module.exports = {
                     'Slash command was invoked but no matching handler is registered.'
                 );
                 return;
+            }
+
+            const cmdName = interaction.commandName;
+            if (OWNER_COMMANDS.has(cmdName) && !isOwner(interaction.user.id)) {
+                try { await interaction.reply({ content: 'Only the bot owner can run this command.', ephemeral: true }); } catch (_) {}
+                try { await securityLogger.logPermissionDenied(interaction, cmdName, 'User is not a bot owner'); } catch (_) {}
+                return;
+            }
+
+            if (ADMIN_COMMANDS.has(cmdName)) {
+                if (!interaction.inGuild()) {
+                    try { await interaction.reply({ content: 'Use this command in a server.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                const isAdmin = interaction.member?.permissions?.has(PermissionsBitField.Flags.Administrator);
+                if (!isAdmin) {
+                    try { await interaction.reply({ content: 'Administrator permission is required to use this command.', ephemeral: true }); } catch (_) {}
+                    try { await securityLogger.logPermissionDenied(interaction, cmdName, 'User missing Administrator'); } catch (_) {}
+                    return;
+                }
             }
 
             const categoryKey = COMMAND_CATEGORY_MAP[interaction.commandName];

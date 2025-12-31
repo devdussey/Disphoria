@@ -35,7 +35,6 @@ const categories = {
     { cmd: '/transriptconfig enable/disable/status', desc: 'Enable automatic voice transcription in chosen channels', perm: 'Manage Server' },
   ],
   'Server Setup & Messaging': [
-    { cmd: '/welcome setup/status/disable/test', desc: 'Build and manage welcome messages for new members', perm: 'Manage Server' },
     { cmd: '/confessconfig', desc: 'Post the anonymous confession button to a channel', perm: 'Manage Server' },
     { cmd: '/autobump add/remove/enable/disable/list', desc: 'Schedule automatic bumps for server listing sites', perm: 'Manage Server' },
     { cmd: '/createchannel', desc: 'Quickly create text, voice, or stage channels with optional category', perm: 'Manage Channels' },
@@ -55,7 +54,6 @@ const categories = {
     { cmd: '/enlarge emoji/sticker/media', desc: 'Post a large version of any emoji, sticker, or image/GIF (2x/4x/8x)', perm: null },
     { cmd: '/clone emoji/sticker', desc: 'Clone emojis or stickers by mention, ID, URL, or upload', perm: 'Manage Emojis and Stickers' },
     { cmd: '/cloneall', desc: 'Bulk clone emojis from another server with filters', perm: 'Manage Emojis and Stickers ┬╖ Premium' },
-    { cmd: '/font', desc: 'Transform your message with decorative Unicode fonts', perm: null },
   ],
   'Embeds & Branding': [
     { cmd: '/embed create/quick', desc: 'Use a guided builder or quick form to craft embeds', perm: null },
@@ -98,7 +96,6 @@ const categories = {
     { cmd: '/backupview', desc: 'Preview a backup and export JSON', perm: 'Bot Owner' },
     { cmd: '/backupdelete', desc: 'Delete a stored backup by id', perm: 'Bot Owner' },
     { cmd: '/fetchmessage', desc: 'Backfill user messages from a channel for analysis tools', perm: 'Bot Owner' },
-    { cmd: '/dmdiag test/role', desc: 'Run DM diagnostics for a member or role', perm: 'Bot Owner' },
     { cmd: '/giverupee', desc: 'Grant Rupees directly to a user', perm: 'Bot Owner or Guild Owner ┬╖ Premium' },
     { cmd: '/wraith start/stop/preset', desc: 'Create a private spam channel and reuse saved presets or the modal', perm: 'Bot Owner + Premium' },
   ],
