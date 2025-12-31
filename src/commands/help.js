@@ -25,7 +25,6 @@ const categories = {
     { cmd: '/verify setup/status/disable/repost', desc: 'Set up button verification with optional account-age rules', perm: 'Manage Server' },
     { cmd: '/createrole', desc: 'Create a role with colour, hoist, mentionable, and position options', perm: 'Manage Roles' },
     { cmd: '/deleterole', desc: 'Delete a role from the server', perm: 'Manage Roles' },
-    { cmd: '/brconfig', desc: 'Enable or disable automatic booster custom roles', perm: 'Manage Server' },
     { cmd: '/brsync', desc: 'Sync booster custom roles for existing boosters', perm: 'Manage Server' },
   ],
   'Logging & Security': [
@@ -63,9 +62,6 @@ const categories = {
     { cmd: '/getembed', desc: 'Extract embed JSON from a message for reuse', perm: null },
     { cmd: '/colour set/get/reset', desc: 'Manage the saved default embed colour for this server', perm: 'Manage Server' },
     { cmd: '/setdefaultcolour & /getdefaultcolour', desc: 'Quick commands to update or view the default embed colour', perm: 'Manage Server (setdefaultcolour)' },
-    { cmd: '/bremblem', desc: 'Upload or clear the emblem on your booster custom role', perm: null },
-    { cmd: '/brcolor', desc: 'Choose a solid or gradient colour for your booster role', perm: null },
-    { cmd: '/brname', desc: 'Rename your booster custom role safely', perm: null },
   ],
   'Economy & Games': [
     { cmd: '/inventory', desc: 'Check your coins plus available Smites and Rupees', perm: null },

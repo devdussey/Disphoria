@@ -21,7 +21,7 @@ module.exports = {
     const enabled = await boosterConfigStore.isEnabled(interaction.guildId);
     if (!enabled) {
       return interaction.reply({
-        content: 'Custom booster roles are disabled on this server. Enable them with /brconfig before running a sync.',
+        content: 'Custom booster roles are disabled on this server. Ask a server manager to enable them before running a sync.',
         ephemeral: true,
       });
     }
@@ -103,4 +103,3 @@ module.exports = {
     await interaction.editReply({ content: message });
   },
 };
-
