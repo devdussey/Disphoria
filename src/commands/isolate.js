@@ -47,6 +47,51 @@ function parseIntInput(value) {
   return n;
 }
 
+async function cleanupIsolation(guild, memberId, record, options = {}) {
+  const result = { channelDeleted: false, channelKept: false, channelId: record?.channelId || null };
+  if (!guild || !record) return result;
+
+  const deleteChannel = options.deleteChannel !== false;
+  const notifyChannelContent = options.notifyChannelContent || null;
+  const deleteReason = options.deleteReason || 'Wraith isolation ended';
+
+  let channel = null;
+  if (record.channelId) {
+    try { channel = await guild.channels.fetch(record.channelId); } catch (_) {}
+  }
+
+  if (record.hiddenOverwrites && Array.isArray(record.hiddenOverwrites) && record.hiddenOverwrites.length) {
+    for (const info of record.hiddenOverwrites) {
+      try {
+        const ch = await guild.channels.fetch(info.channelId);
+        if (!ch || !ch.permissionOverwrites) continue;
+        if (info.existed) {
+          await ch.permissionOverwrites.edit(memberId, { allow: info.allow, deny: info.deny, reason: 'Restore after wraith' });
+        } else {
+          await ch.permissionOverwrites.delete(memberId, 'Restore after wraith');
+        }
+      } catch (_) { /* ignore individual failures */ }
+    }
+  }
+
+  if (channel) {
+    if (notifyChannelContent) {
+      try { await channel.send({ content: notifyChannelContent }); } catch (_) {}
+    }
+    if (deleteChannel) {
+      try {
+        await channel.delete(deleteReason);
+        result.channelDeleted = true;
+      } catch (_) { /* ignore delete failures */ }
+    } else {
+      result.channelKept = true;
+    }
+    result.channelId = channel.id;
+  }
+
+  return result;
+}
+
 function validateWraithConfigInput(raw) {
   const message = (raw?.message || '').trim();
   if (!message) return { error: 'Message is required.' };
@@ -233,6 +278,7 @@ async function runWraithStart(interaction, member, options) {
   const stopAt = durationMs ? Date.now() + durationMs : null;
   let sent = 0;
   const text = customMsg || 'Your isolation has begun.';
+  const record = { channelId: channel.id, intervalId: null, stopAt, hiddenOverwrites };
 
   const createEmbed = (count) => new EmbedBuilder()
     .setTitle('👻 The Wraith Draws Near')
@@ -251,24 +297,35 @@ async function runWraithStart(interaction, member, options) {
   await sendOne(sent + 1);
   sent++;
 
-  const intervalId = setInterval(async () => {
-    if (stopAt && Date.now() >= stopAt) {
-      clearInterval(intervalId);
-      activeIsolations.delete(k);
-      try { await channel.send({ content: 'Stopping.' }); } catch (_) {}
-      return;
-    }
-    if (sent >= maxMessages) {
-      clearInterval(intervalId);
-      activeIsolations.delete(k);
-      try { await channel.send({ content: 'Reached max messages. Stopping.' }); } catch (_) {}
-      return;
-    }
-    sent++;
-    await sendOne(sent);
+  const endIsolation = async (notify, reason) => {
+    if (!activeIsolations.has(k)) return;
+    activeIsolations.delete(k);
+    try { clearInterval(record.intervalId); } catch (_) {}
+    try {
+      await cleanupIsolation(interaction.guild, member.id, record, {
+        deleteChannel: true,
+        notifyChannelContent: notify,
+        deleteReason: reason || 'Wraith isolation ended',
+      });
+    } catch (_) { /* ignore cleanup failures */ }
+  };
+
+  record.intervalId = setInterval(async () => {
+    try {
+      if (stopAt && Date.now() >= stopAt) {
+        await endIsolation('Stopping.', 'Wraith duration reached');
+        return;
+      }
+      if (sent >= maxMessages) {
+        await endIsolation('Reached max messages. Stopping.', 'Wraith max messages reached');
+        return;
+      }
+      sent++;
+      await sendOne(sent);
+    } catch (_) { /* ignore loop failures */ }
   }, intervalMs);
 
-  activeIsolations.set(k, { channelId: channel.id, intervalId, stopAt, hiddenOverwrites });
+  activeIsolations.set(k, record);
 }
 
 async function handleWraithStartModalSubmit(interaction, targetId) {
@@ -546,30 +603,20 @@ module.exports = {
       activeIsolations.delete(k);
       try { clearInterval(rec.intervalId); } catch (_) {}
 
-      let channel = null;
-      try { channel = await interaction.guild.channels.fetch(rec.channelId); } catch (_) {}
-      if (channel && del !== false) {
-        try { await channel.delete('Isolation stopped by owner'); } catch (_) {}
-      } else if (channel) {
-        try { await channel.send({ content: 'Isolation stopped by owner.' }); } catch (_) {}
-      }
-
-      // Restore hidden channels if applicable
-      const memberId = target.id;
-      if (rec.hiddenOverwrites && Array.isArray(rec.hiddenOverwrites) && rec.hiddenOverwrites.length) {
-        for (const info of rec.hiddenOverwrites) {
-          try {
-            const ch = await interaction.guild.channels.fetch(info.channelId);
-            if (!ch || !ch.permissionOverwrites) continue;
-            if (info.existed) {
-              await ch.permissionOverwrites.edit(memberId, { allow: info.allow, deny: info.deny, reason: 'Restore after wraith' });
-            } else {
-              await ch.permissionOverwrites.delete(memberId, 'Restore after wraith');
-            }
-          } catch (_) { /* ignore individual failures */ }
-        }
-      }
-      return interaction.reply({ content: `Stopped isolation for <@${target.id}>${channel ? (del !== false ? ' and deleted channel.' : ' and kept channel.') : '.'}`, ephemeral: true });
+      let cleanupResult = { channelDeleted: false, channelKept: false, channelId: rec.channelId || null };
+      try {
+        cleanupResult = await cleanupIsolation(interaction.guild, target.id, rec, {
+          deleteChannel: del !== false,
+          notifyChannelContent: del === false ? 'Isolation stopped by owner.' : null,
+          deleteReason: 'Isolation stopped by owner',
+        });
+      } catch (_) { /* ignore cleanup failures */ }
+      const suffix = cleanupResult.channelDeleted
+        ? ' and deleted channel.'
+        : cleanupResult.channelKept
+          ? ' and kept channel.'
+          : '.';
+      return interaction.reply({ content: `Stopped isolation for <@${target.id}>${suffix}`, ephemeral: true });
     }
 
     return interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
