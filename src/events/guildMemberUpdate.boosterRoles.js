@@ -2,6 +2,7 @@ const { Events, PermissionsBitField } = require('discord.js');
 const boosterStore = require('../utils/boosterRoleStore');
 const boosterManager = require('../utils/boosterRoleManager');
 const boosterConfigStore = require('../utils/boosterRoleConfigStore');
+const { postBoosterRolePanel } = require('../utils/boosterRolePanel');
 
 async function getMe(guild) {
   if (!guild) return null;
@@ -29,35 +30,65 @@ module.exports = {
         } catch (err) {
           console.error(`Failed to ensure booster role for ${newMember.id} in ${guild.id}:`, err);
         }
+        try {
+          const panel = await boosterConfigStore.getPanel(guild.id);
+          if (panel?.channelId) {
+            let channel = null;
+            try { channel = await guild.channels.fetch(panel.channelId); } catch (_) {}
+            if (channel?.isTextBased?.()) {
+              const me = await getMe(guild);
+              const perms = channel.permissionsFor(me);
+              if (perms?.has(PermissionsBitField.Flags.ViewChannel) && perms?.has(PermissionsBitField.Flags.SendMessages)) {
+                try {
+                  await channel.send({ content: `<@${newMember.id}> thanks for boosting! Use the panel below to customise your booster role.` });
+                } catch (err) {
+                  console.warn(`Failed to announce booster ${newMember.id} in ${guild.id}:`, err);
+                }
+                try {
+                  const sent = await postBoosterRolePanel(channel, panel.messageId);
+                  await boosterConfigStore.setPanel(guild.id, channel.id, sent.id);
+                } catch (err) {
+                  console.warn(`Failed to refresh booster panel for ${guild.id}:`, err);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn(`Failed to handle booster announcement for ${newMember.id} in ${guild.id}:`, err);
+        }
         return;
       }
 
       if (!hasBoost && hadBoost) {
         const roleId = await boosterStore.getRoleId(guild.id, newMember.id);
-        if (!roleId) return;
         let role = null;
-        try { role = await guild.roles.fetch(roleId); } catch (_) { role = null; }
-        if (!role) {
-          await boosterStore.deleteRole(guild.id, newMember.id);
-          return;
+        if (roleId) {
+          try { role = await guild.roles.fetch(roleId); } catch (_) { role = null; }
         }
-
         const me = await getMe(guild);
-        const canManage = me?.permissions?.has(PermissionsBitField.Flags.ManageRoles) && me.roles?.highest?.comparePositionTo(role) > 0;
-        if (!canManage) return;
+        const canManageRole = role && me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)
+          && me.roles?.highest?.comparePositionTo(role) > 0;
 
-        try {
-          if (newMember.roles?.cache?.has(role.id)) {
-            await newMember.roles.remove(role, 'Booster removed their boost');
+        if (role && canManageRole) {
+          try {
+            if (newMember.roles?.cache?.has(role.id)) {
+              await newMember.roles.remove(role, 'Booster removed their boost');
+            }
+          } catch (err) {
+            console.warn(`Failed to remove booster role from ${newMember.id}:`, err);
           }
-        } catch (err) {
-          console.warn(`Failed to remove booster role from ${newMember.id}:`, err);
+
+          try {
+            await role.delete('Booster removed their boost');
+          } catch (err) {
+            console.warn(`Failed to delete booster role ${role.id} in ${guild.id}:`, err);
+          }
         }
 
         try {
-          await role.delete('Booster removed their boost');
+          await boosterManager.cleanupLegacyRoles(newMember, null);
         } catch (err) {
-          console.warn(`Failed to delete booster role ${role.id} in ${guild.id}:`, err);
+          console.warn(`Failed to clean legacy booster roles for ${newMember.id}:`, err);
         }
 
         await boosterStore.deleteRole(guild.id, newMember.id);

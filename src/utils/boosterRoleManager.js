@@ -88,6 +88,50 @@ function sanitizeCustomName(name) {
   return trimmed.slice(0, 100);
 }
 
+async function cleanupLegacyRoles(member, activeRoleId = null) {
+  if (!member?.guild || !member.roles?.cache) {
+    return { removed: 0, deleted: 0, skipped: 0 };
+  }
+
+  const guild = member.guild;
+  const me = await fetchMe(guild);
+  if (!me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)) {
+    return { removed: 0, deleted: 0, skipped: 0 };
+  }
+
+  const legacyRoles = member.roles.cache.filter((role) =>
+    role &&
+    (!activeRoleId || role.id !== activeRoleId) &&
+    typeof role.name === 'string' &&
+    role.name.endsWith(ROLE_SUFFIX)
+  );
+
+  let removed = 0;
+  let deleted = 0;
+  let skipped = 0;
+
+  for (const role of legacyRoles.values()) {
+    if (role.managed || me.roles.highest.comparePositionTo(role) <= 0) {
+      skipped += 1;
+      continue;
+    }
+    const shouldDelete = role.members?.size <= 1;
+    try {
+      await member.roles.remove(role, 'Removing legacy custom booster role');
+      removed += 1;
+    } catch (_) {
+      skipped += 1;
+      continue;
+    }
+    if (shouldDelete) {
+      try { await role.delete('Removing legacy custom booster role'); } catch (_) {}
+      deleted += 1;
+    }
+  }
+
+  return { removed, deleted, skipped };
+}
+
 async function fetchMe(guild) {
   if (!guild) return null;
   const existing = guild.members.me;
@@ -401,6 +445,7 @@ module.exports = {
   ROLE_SUFFIX,
   buildDefaultRoleName,
   sanitizeCustomName,
+  cleanupLegacyRoles,
   ensureRole,
   normalizeColorConfig,
   pngSupportsTransparency,

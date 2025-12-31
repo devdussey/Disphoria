@@ -2,21 +2,9 @@ const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
 } = require('discord.js');
-
-const PANEL_DESCRIPTION = [
-  'Step 1. Figure out your exact hex codes you would like first. If you are unsure, visit https://www.eggradients.com/tool/discord-color-codes first. Primary is the left side and Secondary is right side of your username. (When picking gradiants) Alternatively, if you would rather not have gradiant, just put your hex code in for primary and leave secondary blank.',
-  '',
-  'Step 2. Hit the green button below when ready.',
-  '',
-  'Step 3. Fill in the boxes of the modal. Role Name is quite self explanitory. The Boxes underneath you will need to enter your colours in this format: #ff0000',
-  '',
-  'Step 4. When you are finished, hit the finish button and the bot does the rest. if this has errors, let a admin know please.',
-].join('\n');
+const boosterConfigStore = require('../utils/boosterRoleConfigStore');
+const { postBoosterRolePanel } = require('../utils/boosterRolePanel');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -51,19 +39,21 @@ module.exports = {
       return interaction.reply({ content: `I cannot send messages in ${channel}.`, ephemeral: true });
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(0x00f9ff)
-      .setDescription(PANEL_DESCRIPTION);
-
-    const button = new ButtonBuilder()
-      .setCustomId('brconfig:open')
-      .setLabel('Click Here')
-      .setStyle(ButtonStyle.Success);
-
-    const row = new ActionRowBuilder().addComponents(button);
-
     try {
-      await channel.send({ embeds: [embed], components: [row] });
+      const priorPanel = await boosterConfigStore.getPanel(interaction.guildId);
+      if (priorPanel?.channelId && priorPanel?.messageId && priorPanel.channelId !== channel.id) {
+        try {
+          const oldChannel = await interaction.guild.channels.fetch(priorPanel.channelId);
+          if (oldChannel?.isTextBased?.()) {
+            const oldMessage = await oldChannel.messages.fetch(priorPanel.messageId);
+            if (oldMessage) await oldMessage.delete();
+          }
+        } catch (_) {}
+      }
+
+      const previousMessageId = priorPanel?.channelId === channel.id ? priorPanel?.messageId : null;
+      const sent = await postBoosterRolePanel(channel, previousMessageId);
+      await boosterConfigStore.setPanel(interaction.guildId, channel.id, sent.id);
     } catch (error) {
       return interaction.reply({ content: `Failed to send the booster role panel: ${error.message}`, ephemeral: true });
     }

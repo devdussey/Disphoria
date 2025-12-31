@@ -74,5 +74,46 @@ module.exports = {
     delete data.guilds[guildId];
     scheduleSave();
   },
-};
 
+  async getPanel(guildId) {
+    if (!guildId) return null;
+    const data = await load();
+    const entry = getGuild(data, guildId);
+    const panel = entry.panel;
+    if (!panel || typeof panel !== 'object') return null;
+    const channelId = typeof panel.channelId === 'string' ? panel.channelId : null;
+    const messageId = typeof panel.messageId === 'string' ? panel.messageId : null;
+    if (!channelId) return null;
+    return { channelId, messageId };
+  },
+
+  async setPanel(guildId, channelId, messageId) {
+    if (!guildId || !channelId) return null;
+    const data = await load();
+    const entry = getGuild(data, guildId);
+    if (!entry.panel || typeof entry.panel !== 'object') entry.panel = {};
+    entry.panel.channelId = String(channelId);
+    entry.panel.messageId = messageId ? String(messageId) : null;
+    scheduleSave();
+    return entry.panel;
+  },
+
+  async clearPanel(guildId) {
+    if (!guildId) return;
+    const data = await load();
+    const entry = getGuild(data, guildId);
+    if (!entry.panel) return;
+    delete entry.panel;
+    scheduleSave();
+  },
+
+  async setPanelMessage(guildId, messageId) {
+    if (!guildId) return null;
+    const data = await load();
+    const entry = getGuild(data, guildId);
+    if (!entry.panel || typeof entry.panel !== 'object') return null;
+    entry.panel.messageId = messageId ? String(messageId) : null;
+    scheduleSave();
+    return entry.panel;
+  },
+};

@@ -56,54 +56,6 @@ function isActiveBooster(member, premiumRoleId) {
     return hasBoost || hasPremiumRole;
 }
 
-async function removeLegacyBoosterRoles(member, activeRoleId) {
-    if (!member?.guild || !member.roles?.cache) return { removed: 0, deleted: 0, skipped: 0 };
-    if (!activeRoleId) return { removed: 0, deleted: 0, skipped: 0 };
-    const guild = member.guild;
-    let me = guild.members.me;
-    if (!me) {
-        try { me = await guild.members.fetchMe(); } catch (_) { me = null; }
-    }
-    if (!me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)) {
-        return { removed: 0, deleted: 0, skipped: 0 };
-    }
-
-    const suffix = boosterManager.ROLE_SUFFIX;
-    const legacyRoles = member.roles.cache.filter((role) =>
-        role &&
-        role.id !== activeRoleId &&
-        typeof role.name === 'string' &&
-        role.name.endsWith(suffix)
-    );
-
-    let removed = 0;
-    let deleted = 0;
-    let skipped = 0;
-
-    for (const role of legacyRoles.values()) {
-        if (role.managed || me.roles.highest.comparePositionTo(role) <= 0) {
-            skipped += 1;
-            continue;
-        }
-        const shouldDelete = role.members?.size <= 1;
-        try {
-            await member.roles.remove(role, 'Removing legacy custom booster role');
-            removed += 1;
-        } catch (_) {
-            skipped += 1;
-            continue;
-        }
-        if (shouldDelete) {
-            try {
-                await role.delete('Removing legacy custom booster role');
-                deleted += 1;
-            } catch (_) {}
-        }
-    }
-
-    return { removed, deleted, skipped };
-}
-
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
@@ -811,7 +763,7 @@ module.exports = {
                     try { activeRoleId = await boosterStore.getRoleId(interaction.guildId, interaction.user.id); } catch (_) {}
                 }
 
-                const cleanup = await removeLegacyBoosterRoles(member, activeRoleId);
+                const cleanup = await boosterManager.cleanupLegacyRoles(member, activeRoleId);
                 const notes = ['Your booster role has been updated.'];
                 if (cleanup.removed > 0) {
                     notes.push(`Removed ${cleanup.removed} legacy booster role${cleanup.removed === 1 ? '' : 's'}.`);
