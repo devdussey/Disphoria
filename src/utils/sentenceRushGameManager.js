@@ -133,7 +133,7 @@ function buildLobbyEmbed(game, joinDeadline) {
         name: 'Rules',
         value: 'Take turns guessing the hidden sentence. Send one word per message; each message advances to the next word. Correct letters in the right position reveal for everyone. Correct letters in the wrong position appear in **bold** in the last guess.',
       },
-      { name: 'Settings', value: `Turn timer: **${game.turnSeconds}s**` },
+      { name: 'Settings', value: `Turn timer: **${game.turnSeconds}s**\nWord range: **${game.minWords}-${game.maxWords}** words` },
     );
 }
 
@@ -632,6 +632,8 @@ async function startSentenceRushGame(interaction) {
     revealed: Array.from(sentence.normalized, ch => ch === ' '),
     targetWords: sentence.normalized.split(' '),
     wordCount: sentence.wordCount,
+    minWords: clampInt(config.minWords, 3, 8, 3),
+    maxWords: clampInt(config.maxWords, 3, 8, 8),
     hintButtonId: `sentencerush-hint-${interaction.id}-${Date.now()}`,
     hintUsed: new Set(),
     hintCollector: null,

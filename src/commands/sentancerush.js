@@ -93,8 +93,11 @@ module.exports = {
     }
 
     if (subcommand === 'settings') {
-      if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild)) {
-        return interaction.reply({ content: 'Manage Server permission is required to update SentenceRush settings.', ephemeral: true });
+      const isManager = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild)
+        || interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageChannels)
+        || interaction.memberPermissions?.has(PermissionsBitField.Flags.ModerateMembers);
+      if (!isManager) {
+        return interaction.reply({ content: 'Manage Server, Manage Channels, or Moderate Members is required to update SentenceRush settings.', ephemeral: true });
       }
 
       const minWords = interaction.options.getInteger('min_words');
@@ -116,10 +119,18 @@ module.exports = {
 
       const updated = sentenceRushConfigStore.setConfig(interaction.guildId, updates);
 
-      return interaction.reply({
-        content: `SentenceRush settings updated: min words **${updated.minWords}**, max words **${updated.maxWords}**, turn timer **${updated.turnSeconds}s**.`,
-        ephemeral: true,
-      });
+      const embed = {
+        title: 'SentenceRush Settings Updated',
+        description: `${interaction.user} updated settings.`,
+        color: 0x5865f2,
+        fields: [
+          { name: 'Min Words', value: String(updated.minWords), inline: true },
+          { name: 'Max Words', value: String(updated.maxWords), inline: true },
+          { name: 'Turn Timer', value: `${updated.turnSeconds}s`, inline: true },
+        ],
+      };
+
+      return interaction.reply({ embeds: [embed] });
     }
 
     return interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
