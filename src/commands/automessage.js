@@ -35,6 +35,12 @@ module.exports = {
       sub
         .setName('create')
         .setDescription('Create an automatic message or embed')
+        .addIntegerOption(opt =>
+          opt.setName('hours')
+            .setDescription('How often to send')
+            .setRequired(true)
+            .addChoices(...INTERVAL_CHOICES)
+        )
         .addChannelOption(opt =>
           opt.setName('channel')
             .setDescription('Channel to post in (defaults to here)')
@@ -44,12 +50,6 @@ module.exports = {
               ChannelType.PublicThread,
               ChannelType.PrivateThread,
             )
-        )
-        .addIntegerOption(opt =>
-          opt.setName('hours')
-            .setDescription('How often to send')
-            .setRequired(true)
-            .addChoices(...INTERVAL_CHOICES)
         )
         .addStringOption(opt =>
           opt.setName('message')
