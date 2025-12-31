@@ -70,6 +70,7 @@ const categories = {
     { cmd: '/horserace', desc: 'Host a chaotic horse race mini-game with your server', perm: null },
     { cmd: '/horseracestandings', desc: 'Review historical podium finishes or personal stats', perm: null },
     { cmd: '/wordrush start', desc: 'Start a WordRush lobby (30s join button) - last player with lives wins', perm: null },
+    { cmd: '/sentancerush start', desc: 'Start a SentenceRush lobby (30s join button) - guess the hidden sentence', perm: null },
     { cmd: '/triviastart', desc: 'Start a multi-round trivia match in the channel', perm: null },
     { cmd: '/triviastop', desc: 'End an active trivia session early', perm: null },
     { cmd: '/triviacategories', desc: 'Browse the available trivia categories and difficulties', perm: null },
