@@ -229,7 +229,7 @@ module.exports = {
       .map((c) => {
         const meta = categoryMeta[c] ?? {};
         const option = { label: c, value: c };
-        if (meta.emoji) option.emoji = meta.emoji;
+        if (meta.emoji) option.emoji = { name: meta.emoji };
         if (meta.blurb) option.description = meta.blurb;
         return option;
       });

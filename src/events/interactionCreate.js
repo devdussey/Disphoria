@@ -45,7 +45,7 @@ async function logCommandUsage(interaction, status, details, color = 0x5865f2) {
         fields.push({ name: 'Channel', value: `<#${interaction.channel.id}> (${interaction.channel.id})`, inline: true });
     }
     if (details) {
-        fields.push({ name: 'Details', value: details, inline: false });
+        fields.push({ name: 'Details', value: truncate(details, 1024), inline: false });
     }
     const embed = new EmbedBuilder()
         .setTitle(`Command ${status}`)
