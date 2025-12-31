@@ -9,6 +9,26 @@ function parseRoleIds(input) {
   return Array.from(new Set(matches));
 }
 
+function parseEmojiTokens(input) {
+  const matches = String(input || '').match(/<a?:\w+:\d+>|[^\s,]+/g);
+  return matches ? matches.filter(Boolean) : [];
+}
+
+function parseEmojiToken(token) {
+  const trimmed = String(token || '').trim();
+  if (!trimmed) return null;
+  const customMatch = trimmed.match(/^<a?:(\w+):(\d+)>$/);
+  if (customMatch) {
+    const animated = trimmed.startsWith('<a:');
+    return {
+      id: customMatch[2],
+      name: customMatch[1],
+      animated: animated ? true : undefined,
+    };
+  }
+  return trimmed;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('rrcreate')
@@ -20,6 +40,11 @@ module.exports = {
         .setName('roles')
         .setDescription('Role mentions or IDs (space or comma separated)')
         .setRequired(true)
+    )
+    .addStringOption(opt =>
+      opt
+        .setName('emojis')
+        .setDescription('Optional emoji list aligned to roles (same order)')
     )
     .addStringOption(opt =>
       opt
@@ -99,6 +124,19 @@ module.exports = {
       return interaction.editReply({ content: 'None of the provided roles can be managed by the bot.' });
     }
 
+    const emojisInput = interaction.options.getString('emojis');
+    const emojiTokens = parseEmojiTokens(emojisInput);
+    const emojiMap = {};
+    if (emojiTokens.length) {
+      for (let i = 0; i < validRoles.length; i += 1) {
+        const token = emojiTokens[i];
+        if (!token) continue;
+        const parsed = parseEmojiToken(token);
+        if (!parsed) continue;
+        emojiMap[validRoles[i].id] = parsed;
+      }
+    }
+
     const allowMultiple = interaction.options.getBoolean('allow_multiple');
     const multi = allowMultiple === null ? true : allowMultiple;
 
@@ -143,6 +181,7 @@ module.exports = {
         channelId: targetChannel.id,
         messageId: targetMessage.id,
         roleIds: validRoles.map(role => role.id),
+        emojis: emojiMap,
         multi,
         createdBy: interaction.user.id,
       });

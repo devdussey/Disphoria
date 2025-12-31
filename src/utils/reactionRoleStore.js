@@ -54,6 +54,36 @@ function sanitiseRoleIds(roleIds) {
   return output;
 }
 
+function sanitiseEmojiValue(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === 'object') {
+    const id = value.id ? String(value.id).trim() : '';
+    const name = value.name ? String(value.name).trim() : '';
+    if (!id && !name) return null;
+    const cleaned = { id: id || null, name: name || null };
+    if (value.animated === true) cleaned.animated = true;
+    return cleaned;
+  }
+  return null;
+}
+
+function sanitiseEmojiMap(emojis, roleIds) {
+  const map = emojis && typeof emojis === 'object' ? emojis : {};
+  const ids = Array.isArray(roleIds) ? roleIds : [];
+  const output = {};
+  for (const id of ids) {
+    if (!Object.prototype.hasOwnProperty.call(map, id)) continue;
+    const value = sanitiseEmojiValue(map[id]);
+    if (!value) continue;
+    output[id] = value;
+  }
+  return output;
+}
+
 function sanitisePanel(panel) {
   if (!panel || typeof panel !== 'object') return null;
   const cleaned = { ...panel };
@@ -62,6 +92,7 @@ function sanitisePanel(panel) {
   cleaned.channelId = cleaned.channelId ? String(cleaned.channelId) : null;
   cleaned.messageId = cleaned.messageId ? String(cleaned.messageId) : null;
   cleaned.roleIds = sanitiseRoleIds(cleaned.roleIds);
+  cleaned.emojis = sanitiseEmojiMap(cleaned.emojis, cleaned.roleIds);
   cleaned.multi = cleaned.multi === true;
   cleaned.createdBy = String(cleaned.createdBy || '').trim();
   cleaned.createdAt = Number.isFinite(cleaned.createdAt) ? cleaned.createdAt : Date.now();
@@ -77,6 +108,7 @@ function createPanel(guildId, panel) {
     channelId: panel?.channelId,
     messageId: panel?.messageId,
     roleIds: panel?.roleIds,
+    emojis: panel?.emojis,
     multi: panel?.multi === true,
     createdBy: panel?.createdBy,
     createdAt: Date.now(),

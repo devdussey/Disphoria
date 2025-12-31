@@ -14,8 +14,9 @@ function rowHasCustomId(row, customId) {
   });
 }
 
-function buildRoleOptions(guild, roleIds) {
-  const ids = Array.isArray(roleIds) ? roleIds : [];
+function buildRoleOptions(guild, panel) {
+  const ids = Array.isArray(panel?.roleIds) ? panel.roleIds : [];
+  const emojiMap = panel?.emojis && typeof panel.emojis === 'object' ? panel.emojis : {};
   const options = [];
   const missing = [];
   for (const id of ids.slice(0, MAX_OPTIONS)) {
@@ -25,18 +26,23 @@ function buildRoleOptions(guild, roleIds) {
       continue;
     }
     const count = Number.isInteger(role.members?.size) ? role.members.size : 0;
-    options.push({
+    const option = {
       label: role.name.slice(0, 100),
       value: id,
       description: `${count} member${count === 1 ? '' : 's'}`,
-    });
+    };
+    if (Object.prototype.hasOwnProperty.call(emojiMap, id)) {
+      const emoji = emojiMap[id];
+      if (emoji) option.emoji = emoji;
+    }
+    options.push(option);
   }
   return { options, missing };
 }
 
 function buildMenuRow(panel, guild) {
   const customId = `rr:select:${panel.id}`;
-  const { options, missing } = buildRoleOptions(guild, panel.roleIds);
+  const { options, missing } = buildRoleOptions(guild, panel);
   let finalOptions = options;
   let disabled = false;
   if (!finalOptions.length) {
