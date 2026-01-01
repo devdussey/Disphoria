@@ -175,8 +175,10 @@ module.exports = {
       }
     }
 
-    // Preserve any existing embeds (e.g., banner images) when attaching a menu to an existing message.
+    // Preserve existing embeds (e.g., banner images) when attaching to an existing message.
     const baseEmbeds = targetMessage.embeds || [];
+    const hasMediaEmbed = baseEmbeds.some(e => e?.image || e?.video || e?.thumbnail || e?.data?.image || e?.data?.video || e?.data?.thumbnail);
+    const shouldDropAttachments = Boolean(messageId && targetMessage.attachments?.size && hasMediaEmbed);
 
     let panel = null;
     try {
@@ -201,7 +203,9 @@ module.exports = {
     }
 
     try {
-      await targetMessage.edit({ components: merged.rows, embeds: baseEmbeds });
+      const editPayload = { components: merged.rows, embeds: baseEmbeds };
+      if (shouldDropAttachments) editPayload.attachments = [];
+      await targetMessage.edit(editPayload);
     } catch (err) {
       reactionRoleStore.removePanel(interaction.guildId, panel.id);
       console.error('Failed to attach reaction role menu:', err);
