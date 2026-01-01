@@ -202,7 +202,7 @@ module.exports = {
       targetMessage.embeds,
       summary.embed,
       panel,
-      { dropMediaEmbeds: true },
+      { combineWithMediaEmbed: true },
     );
     if (!embedMerge.ok) {
       reactionRoleStore.removePanel(interaction.guildId, panel.id);

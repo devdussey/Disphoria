@@ -483,7 +483,7 @@ module.exports = {
                     interaction.message.embeds,
                     summary.embed,
                     panel,
-                    { dropMediaEmbeds: true },
+                    { combineWithMediaEmbed: true },
                 );
 
                 const editPayload = {};
