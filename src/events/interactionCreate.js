@@ -479,7 +479,7 @@ module.exports = {
                 const merged = reactionRoleManager.upsertMenuRow(interaction.message.components, view.customId, view.row);
 
                 const summary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild);
-                const embedMerge = reactionRoleManager.mergeSummaryEmbed(interaction.message.embeds, summary.embed, panel.id);
+                const embedMerge = reactionRoleManager.mergeSummaryEmbed(interaction.message.embeds, summary.embed, panel);
 
                 const editPayload = {};
                 if (merged.ok) editPayload.components = merged.rows;
@@ -515,8 +515,14 @@ module.exports = {
                     title: 'Your reaction roles',
                 });
 
-                const followUpPayload = { embeds: [personalSummary.embed], ephemeral: true };
-                if (notes.length) followUpPayload.content = notes.join(' ');
+                const selectionLine = personalRoles.length
+                    ? `You have selected: ${personalRoles.map(id => `<@&${id}>`).join(', ')}.`
+                    : 'You have selected: none.';
+                const followUpPayload = {
+                    content: notes.length ? `${selectionLine} ${notes.join(' ')}` : selectionLine,
+                    embeds: [personalSummary.embed],
+                    ephemeral: true,
+                };
 
                 try { await interaction.followUp(followUpPayload); } catch (_) {}
                 return;

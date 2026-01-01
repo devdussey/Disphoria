@@ -198,7 +198,7 @@ module.exports = {
     }
 
     const summary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild);
-    const embedMerge = reactionRoleManager.mergeSummaryEmbed(targetMessage.embeds, summary.embed, panel.id);
+    const embedMerge = reactionRoleManager.mergeSummaryEmbed(targetMessage.embeds, summary.embed, panel);
     if (!embedMerge.ok) {
       reactionRoleStore.removePanel(interaction.guildId, panel.id);
       const reason = embedMerge.error === 'max_embeds'

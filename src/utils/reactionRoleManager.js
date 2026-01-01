@@ -101,6 +101,8 @@ function buildSummaryEmbed(panel, guild, opts = {}) {
   const highlightIds = new Set(Array.isArray(opts.highlightRoleIds) ? opts.highlightRoleIds : []);
   const lines = [];
   const missing = [];
+  let totalMembers = 0;
+  const roleData = [];
 
   for (const id of ids.slice(0, MAX_OPTIONS)) {
     const role = guild?.roles?.cache?.get(id) || null;
@@ -109,41 +111,58 @@ function buildSummaryEmbed(panel, guild, opts = {}) {
       lines.push(`- Role deleted (ID ${id})`);
       continue;
     }
-    const emoji = formatEmojiForEmbed(emojiMap[id]);
     const count = getRoleCount(role);
-    const selectionSuffix = highlightIds.has(id) ? ' (you have this)' : '';
+    totalMembers += count;
+    roleData.push({ role, count, emoji: formatEmojiForEmbed(emojiMap[id]) });
+  }
+
+  for (const entry of roleData) {
+    const { role, count, emoji } = entry;
+    const selectionSuffix = highlightIds.has(role.id) ? ' (you have this)' : '';
+    const percent = totalMembers > 0 ? Math.round((count / totalMembers) * 100) : 0;
     const emojiPart = emoji ? `${emoji} ` : '';
-    const plural = count === 1 ? '' : 's';
-    lines.push(`${emojiPart}<@&${role.id}> - ${count} member${plural}${selectionSuffix}`);
+    const plural = count === 1 ? 'Member' : 'Members';
+    lines.push(`${emojiPart}<@&${role.id}> - ${count} ${plural} (${percent}%)${selectionSuffix}`);
   }
 
   if (!lines.length) lines.push('No roles configured yet.');
 
-  const embed = new EmbedBuilder()
-    .setTitle(opts.title || 'Reaction Roles')
-    .setDescription(lines.join('\n'))
-    .setFooter({ text: `${SUMMARY_FOOTER_PREFIX}${panel?.id || '?'}` });
+  const embed = new EmbedBuilder().setDescription(lines.join('\n'));
+  if (opts.title) embed.setTitle(opts.title);
 
   try { applyDefaultColour(embed, guild?.id); } catch (_) {}
 
   return { embed, missingRoleIds: missing };
 }
 
-function mergeSummaryEmbed(existingEmbeds, summaryEmbed, panelId) {
+function isSummaryEmbed(embed, panelId, roleIds) {
+  const footerText = (embed?.footer?.text || '');
+  if (footerText.includes(SUMMARY_FOOTER_PREFIX)) return true;
+  const desc = typeof embed?.description === 'string' ? embed.description : '';
+  if (!desc) return false;
+  if (desc.includes('Role deleted (ID')) return true;
+  if (desc.includes('No roles configured yet.')) return true;
+  if (Array.isArray(roleIds)) {
+    for (const id of roleIds) {
+      if (desc.includes(`<@&${id}>`)) return true;
+    }
+  }
+  return false;
+}
+
+function mergeSummaryEmbed(existingEmbeds, summaryEmbed, panel) {
   const embeds = normaliseEmbeds(existingEmbeds);
   const summaryJson = typeof summaryEmbed?.toJSON === 'function' ? summaryEmbed.toJSON() : summaryEmbed;
   if (!summaryJson) return { ok: false, error: 'invalid_summary', embeds };
-  const footerText = `${SUMMARY_FOOTER_PREFIX}${panelId}`;
-  const idx = embeds.findIndex(e => (e?.footer?.text || '') === footerText);
-  if (idx === -1) {
-    if (embeds.length >= 10) {
-      return { ok: false, error: 'max_embeds', embeds };
-    }
-    return { ok: true, embeds: [summaryJson, ...embeds], inserted: true };
+  const panelId = panel?.id || panel;
+  const roleIds = Array.isArray(panel?.roleIds) ? panel.roleIds : [];
+  const filtered = embeds.filter(e => !isSummaryEmbed(e, panelId, roleIds));
+  if (filtered.length === embeds.length && embeds.length >= 10) {
+    return { ok: false, error: 'max_embeds', embeds };
   }
-  const next = embeds.slice();
-  next[idx] = summaryJson;
-  return { ok: true, embeds: next, replaced: true };
+  const next = [...filtered, summaryJson];
+  const replaced = filtered.length !== embeds.length;
+  return { ok: true, embeds: next, replaced, inserted: !replaced };
 }
 
 function removeSummaryEmbed(existingEmbeds, panelId) {
