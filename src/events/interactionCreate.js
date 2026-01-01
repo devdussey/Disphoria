@@ -140,15 +140,15 @@ const COMMAND_CATEGORY_MAP = {
 };
 
 function getCategoryLabel(key) {
-    return botConfigStore.getCategoryDefinition(key)?.label || key || 'This category';
+  return botConfigStore.getCategoryDefinition(key)?.label || key || 'This category';
 }
 
 const OWNER_COMMANDS = new Set(['wraith']);
 const ADMIN_COMMANDS = new Set([
-    'antinuke',
-    'automessage',
-    'autorespond',
-    'autoroles',
+  'antinuke',
+  'automessage',
+  'autorespond',
+  'autoroles',
     'backup',
     'backupdelete',
     'backuplist',
@@ -164,22 +164,24 @@ const ADMIN_COMMANDS = new Set([
     'deleterole',
     'embed',
     'fetchmessage',
-    'giverupee',
-    'isolate',
-    'jail',
-    'jointracker',
-    'joinstrackerleaders',
-    'leavetracker',
-    'leavetrackerleaders',
-    'logtree',
-    'logconfig',
-    'rrcreate',
-    'rrdelete',
-    'rrlist',
-    'rupeeconfig',
-    'transriptconfig',
-    'vanityrole',
-    'webhooks',
+  'giverupee',
+  'isolate',
+  'jail',
+  'logtree',
+  'logconfig',
+  'rrcreate',
+  'rrdelete',
+  'rrlist',
+  'rupeeconfig',
+  'transriptconfig',
+  'vanityrole',
+  'webhooks',
+]);
+const MANAGE_GUILD_COMMANDS = new Set([
+  'jointracker',
+  'joinstrackerleaders',
+  'leavetracker',
+  'leavetrackerleaders',
 ]);
 
 module.exports = {
@@ -219,6 +221,19 @@ module.exports = {
                 if (!isAdmin) {
                     try { await interaction.reply({ content: 'Administrator permission is required to use this command.', ephemeral: true }); } catch (_) {}
                     try { await securityLogger.logPermissionDenied(interaction, cmdName, 'User missing Administrator'); } catch (_) {}
+                    return;
+                }
+            }
+
+            if (MANAGE_GUILD_COMMANDS.has(cmdName)) {
+                if (!interaction.inGuild()) {
+                    try { await interaction.reply({ content: 'Use this command in a server.', ephemeral: true }); } catch (_) {}
+                    return;
+                }
+                const canManageGuild = interaction.member?.permissions?.has(PermissionsBitField.Flags.ManageGuild);
+                if (!canManageGuild) {
+                    try { await interaction.reply({ content: 'Manage Server permission is required to use this command.', ephemeral: true }); } catch (_) {}
+                    try { await securityLogger.logPermissionDenied(interaction, cmdName, 'User missing ManageGuild'); } catch (_) {}
                     return;
                 }
             }
