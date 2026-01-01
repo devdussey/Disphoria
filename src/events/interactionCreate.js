@@ -477,17 +477,48 @@ module.exports = {
 
                 const view = reactionRoleManager.buildMenuRow(panel, interaction.guild);
                 const merged = reactionRoleManager.upsertMenuRow(interaction.message.components, view.customId, view.row);
-                if (merged.ok) {
-                    try { await interaction.message.edit({ components: merged.rows }); } catch (_) {}
+
+                const summary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild);
+                const embedMerge = reactionRoleManager.mergeSummaryEmbed(interaction.message.embeds, summary.embed, panel.id);
+
+                const editPayload = {};
+                if (merged.ok) editPayload.components = merged.rows;
+                if (embedMerge.ok) editPayload.embeds = embedMerge.embeds;
+
+                if (Object.keys(editPayload).length) {
+                    try { await interaction.message.edit(editPayload); } catch (_) {}
                 }
 
-                if (updateError || blockedAdd.length || blockedRemove.length) {
-                    const notes = [];
-                    if (updateError) notes.push(updateError);
-                    if (blockedAdd.length) notes.push('Some selected roles could not be added due to role hierarchy.');
-                    if (blockedRemove.length) notes.push('Some selected roles could not be removed due to role hierarchy.');
-                    try { await interaction.followUp({ content: notes.join(' '), ephemeral: true }); } catch (_) {}
+                const notes = [];
+                if (!embedMerge.ok && embedMerge.error === 'max_embeds') {
+                    notes.push('Cannot update the summary embed because the message already has 10 embeds.');
+                } else if (!embedMerge.ok) {
+                    notes.push('Could not refresh the summary embed for this panel.');
                 }
+                if (updateError) notes.push(updateError);
+                if (blockedAdd.length) notes.push('Some selected roles could not be added due to role hierarchy.');
+                if (blockedRemove.length) notes.push('Some selected roles could not be removed due to role hierarchy.');
+
+                let finalRoleSet = new Set(member.roles.cache.keys());
+                if (updateError) {
+                    try {
+                        const fresh = await interaction.guild.members.fetch(interaction.user.id);
+                        finalRoleSet = new Set(fresh.roles.cache.keys());
+                    } catch (_) {}
+                } else {
+                    for (const id of toAdd) finalRoleSet.add(id);
+                    for (const id of toRemove) finalRoleSet.delete(id);
+                }
+                const personalRoles = panelRoleIds.filter(id => finalRoleSet.has(id));
+                const personalSummary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild, {
+                    highlightRoleIds: personalRoles,
+                    title: 'Your reaction roles',
+                });
+
+                const followUpPayload = { embeds: [personalSummary.embed], ephemeral: true };
+                if (notes.length) followUpPayload.content = notes.join(' ');
+
+                try { await interaction.followUp(followUpPayload); } catch (_) {}
                 return;
             }
         }

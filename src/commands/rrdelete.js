@@ -48,21 +48,36 @@ module.exports = {
     reactionRoleStore.removePanel(interaction.guildId, panel.id);
 
     let removedMenu = false;
+    let removedSummary = false;
     try {
       const channel = await interaction.guild.channels.fetch(panel.channelId);
       if (channel?.isTextBased?.()) {
         const message = await channel.messages.fetch(panel.messageId);
         if (message?.editable) {
+          const summaryKey = `Reaction Roles - Panel #${panel.id}`;
+          const hadSummary = Array.isArray(message.embeds)
+            ? message.embeds.some(e => (e?.footer?.text || '') === summaryKey)
+            : false;
           const res = reactionRoleManager.removeMenuRow(message.components, `rr:select:${panel.id}`);
-          if (res.removed) {
-            await message.edit({ components: res.rows });
-            removedMenu = true;
+          const summaryRes = reactionRoleManager.removeSummaryEmbed(message.embeds, panel.id);
+          const payload = {};
+          if (res.removed) payload.components = res.rows;
+          if (summaryRes.removed) payload.embeds = summaryRes.embeds;
+          if (Object.keys(payload).length) {
+            await message.edit(payload);
+            removedMenu = res.removed;
+            removedSummary = summaryRes.removed || !hadSummary;
+          } else if (!hadSummary) {
+            removedSummary = true; // Nothing to remove is fine
           }
         }
       }
     } catch (_) {}
 
-    const suffix = removedMenu ? '' : ' (menu not removed from the message)';
+    const missingBits = [];
+    if (!removedMenu) missingBits.push('menu');
+    if (!removedSummary) missingBits.push('summary embed');
+    const suffix = missingBits.length ? ` (could not remove ${missingBits.join(' and ')} from the message)` : '';
     return interaction.editReply({ content: `Removed reaction role panel #${panel.id}${suffix}.` });
   },
 };

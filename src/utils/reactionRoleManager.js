@@ -1,9 +1,17 @@
-const { ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder } = require('discord.js');
+const { applyDefaultColour } = require('./guildColourStore');
 
 const MAX_OPTIONS = 25;
+const SUMMARY_FOOTER_PREFIX = 'Reaction Roles - Panel #';
 
 function normaliseRows(rows) {
   return (rows || []).map(row => (typeof row.toJSON === 'function' ? row.toJSON() : row));
+}
+
+function normaliseEmbeds(embeds) {
+  return (embeds || [])
+    .map(embed => (typeof embed?.toJSON === 'function' ? embed.toJSON() : embed))
+    .filter(Boolean);
 }
 
 function rowHasCustomId(row, customId) {
@@ -12,6 +20,27 @@ function rowHasCustomId(row, customId) {
     const id = component?.custom_id || component?.customId;
     return id === customId;
   });
+}
+
+function formatEmojiForEmbed(emoji) {
+  if (!emoji) return null;
+  if (typeof emoji === 'string') return emoji;
+  if (typeof emoji === 'object') {
+    const name = emoji.name || 'emoji';
+    if (emoji.id) {
+      const prefix = emoji.animated ? '<a:' : '<:';
+      return `${prefix}${name}:${emoji.id}>`;
+    }
+    return name;
+  }
+  return null;
+}
+
+function getRoleCount(role) {
+  if (!role) return 0;
+  if (Number.isInteger(role.memberCount)) return role.memberCount;
+  if (role.members && Number.isInteger(role.members.size)) return role.members.size;
+  return 0;
 }
 
 function buildRoleOptions(guild, panel) {
@@ -25,7 +54,7 @@ function buildRoleOptions(guild, panel) {
       missing.push(id);
       continue;
     }
-    const count = Number.isInteger(role.members?.size) ? role.members.size : 0;
+    const count = getRoleCount(role);
     const option = {
       label: role.name.slice(0, 100),
       value: id,
@@ -66,6 +95,64 @@ function buildMenuRow(panel, guild) {
   };
 }
 
+function buildSummaryEmbed(panel, guild, opts = {}) {
+  const ids = Array.isArray(panel?.roleIds) ? panel.roleIds : [];
+  const emojiMap = panel?.emojis && typeof panel.emojis === 'object' ? panel.emojis : {};
+  const highlightIds = new Set(Array.isArray(opts.highlightRoleIds) ? opts.highlightRoleIds : []);
+  const lines = [];
+  const missing = [];
+
+  for (const id of ids.slice(0, MAX_OPTIONS)) {
+    const role = guild?.roles?.cache?.get(id) || null;
+    if (!role) {
+      missing.push(id);
+      lines.push(`- Role deleted (ID ${id})`);
+      continue;
+    }
+    const emoji = formatEmojiForEmbed(emojiMap[id]);
+    const count = getRoleCount(role);
+    const selectionSuffix = highlightIds.has(id) ? ' (you have this)' : '';
+    const emojiPart = emoji ? `${emoji} ` : '';
+    const plural = count === 1 ? '' : 's';
+    lines.push(`${emojiPart}<@&${role.id}> - ${count} member${plural}${selectionSuffix}`);
+  }
+
+  if (!lines.length) lines.push('No roles configured yet.');
+
+  const embed = new EmbedBuilder()
+    .setTitle(opts.title || 'Reaction Roles')
+    .setDescription(lines.join('\n'))
+    .setFooter({ text: `${SUMMARY_FOOTER_PREFIX}${panel?.id || '?'}` });
+
+  try { applyDefaultColour(embed, guild?.id); } catch (_) {}
+
+  return { embed, missingRoleIds: missing };
+}
+
+function mergeSummaryEmbed(existingEmbeds, summaryEmbed, panelId) {
+  const embeds = normaliseEmbeds(existingEmbeds);
+  const summaryJson = typeof summaryEmbed?.toJSON === 'function' ? summaryEmbed.toJSON() : summaryEmbed;
+  if (!summaryJson) return { ok: false, error: 'invalid_summary', embeds };
+  const footerText = `${SUMMARY_FOOTER_PREFIX}${panelId}`;
+  const idx = embeds.findIndex(e => (e?.footer?.text || '') === footerText);
+  if (idx === -1) {
+    if (embeds.length >= 10) {
+      return { ok: false, error: 'max_embeds', embeds };
+    }
+    return { ok: true, embeds: [summaryJson, ...embeds], inserted: true };
+  }
+  const next = embeds.slice();
+  next[idx] = summaryJson;
+  return { ok: true, embeds: next, replaced: true };
+}
+
+function removeSummaryEmbed(existingEmbeds, panelId) {
+  const embeds = normaliseEmbeds(existingEmbeds);
+  const footerText = `${SUMMARY_FOOTER_PREFIX}${panelId}`;
+  const filtered = embeds.filter(e => (e?.footer?.text || '') !== footerText);
+  return { embeds: filtered, removed: filtered.length !== embeds.length };
+}
+
 function upsertMenuRow(existingRows, customId, menuRow) {
   const rows = normaliseRows(existingRows);
   const nextRow = typeof menuRow?.toJSON === 'function' ? menuRow.toJSON() : menuRow;
@@ -98,4 +185,7 @@ module.exports = {
   buildMenuRow,
   upsertMenuRow,
   removeMenuRow,
+  buildSummaryEmbed,
+  mergeSummaryEmbed,
+  removeSummaryEmbed,
 };

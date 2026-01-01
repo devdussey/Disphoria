@@ -197,8 +197,18 @@ module.exports = {
       return interaction.editReply({ content: 'That message already has the maximum number of component rows.' });
     }
 
+    const summary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild);
+    const embedMerge = reactionRoleManager.mergeSummaryEmbed(targetMessage.embeds, summary.embed, panel.id);
+    if (!embedMerge.ok) {
+      reactionRoleStore.removePanel(interaction.guildId, panel.id);
+      const reason = embedMerge.error === 'max_embeds'
+        ? 'That message already has 10 embeds. Remove one before adding reaction roles.'
+        : 'Failed to add the reaction roles summary embed.';
+      return interaction.editReply({ content: reason });
+    }
+
     try {
-      await targetMessage.edit({ components: merged.rows });
+      await targetMessage.edit({ components: merged.rows, embeds: embedMerge.embeds });
     } catch (err) {
       reactionRoleStore.removePanel(interaction.guildId, panel.id);
       console.error('Failed to attach reaction role menu:', err);
