@@ -164,22 +164,27 @@ function isSummaryEmbed(embed, panelId, roleIds) {
 }
 
 function mergeSummaryEmbed(existingEmbeds, summaryEmbed, panel, opts = {}) {
-  const dropMediaEmbeds = opts.combineWithMediaEmbed ? false : opts.dropMediaEmbeds === true;
-  const embeds = normaliseEmbeds(existingEmbeds).filter(embed => {
-    if (!dropMediaEmbeds) return true;
-    const media = hasMedia(embed);
-    const hasText = hasMeaningfulText(embed);
-    // Drop pure media previews (e.g., link/attachment previews) to avoid double banners.
-    return !(media && !hasText);
-  });
+  const replaceAll = opts.replaceAll === true;
+  const combineWithMediaEmbed = opts.combineWithMediaEmbed === true && !replaceAll;
+  const dropMediaEmbeds = combineWithMediaEmbed ? false : opts.dropMediaEmbeds === true;
+
+  let embeds = normaliseEmbeds(existingEmbeds);
+  if (!replaceAll && dropMediaEmbeds) {
+    embeds = embeds.filter(embed => {
+      const media = hasMedia(embed);
+      const hasText = hasMeaningfulText(embed);
+      // Drop pure media previews (e.g., link/attachment previews) to avoid double banners.
+      return !(media && !hasText);
+    });
+  }
   const summaryJson = typeof summaryEmbed?.toJSON === 'function' ? summaryEmbed.toJSON() : summaryEmbed;
   if (!summaryJson) return { ok: false, error: 'invalid_summary', embeds };
   const panelId = panel?.id || panel;
   const roleIds = Array.isArray(panel?.roleIds) ? panel.roleIds : [];
-  const filtered = embeds.filter(e => !isSummaryEmbed(e, panelId, roleIds));
+  const filtered = replaceAll ? [] : embeds.filter(e => !isSummaryEmbed(e, panelId, roleIds));
 
   // Try to fold the summary into an existing media embed so the counts sit with the image.
-  if (opts.combineWithMediaEmbed) {
+  if (combineWithMediaEmbed) {
     const mediaIndex = filtered.findIndex(hasMedia);
     if (mediaIndex !== -1) {
       const combined = JSON.parse(JSON.stringify(filtered[mediaIndex] || {}));
