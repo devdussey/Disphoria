@@ -7,8 +7,15 @@ const {
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
+const axios = require('axios');
+const sharp = require('sharp');
 const modlog = require('../utils/modLogger');
 const { getUserRecord, upsertUserRecord } = require('../utils/vanityRoleStore');
+
+const ROLE_ICON_SIZE_PX = 64;
+const MAX_ROLE_ICON_BYTES = 256 * 1024;
+const MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024;
+const ALLOWED_ICON_FORMATS = new Set(['png', 'jpg', 'jpeg']);
 
 function normalizeHex6(input) {
   if (!input) return null;
@@ -45,6 +52,70 @@ function pickActiveColors(rec, which) {
   }
 
   return { active, primaryColor: null, secondaryColor: null };
+}
+
+function inferFormatFromName(name) {
+  if (!name || typeof name !== 'string') return null;
+  const match = name.toLowerCase().match(/\.([a-z0-9]+)(?:\?.*)?$/);
+  if (!match) return null;
+  const ext = match[1];
+  if (ext === 'jpeg' || ext === 'jpg') return 'jpeg';
+  if (ext === 'png') return 'png';
+  return null;
+}
+
+function inferFormatFromContentType(contentType) {
+  if (!contentType || typeof contentType !== 'string') return null;
+  const lower = contentType.toLowerCase();
+  if (lower.includes('png')) return 'png';
+  if (lower.includes('jpeg') || lower.includes('jpg')) return 'jpeg';
+  return null;
+}
+
+async function fetchImageBuffer(url) {
+  const response = await axios.get(url, {
+    responseType: 'arraybuffer',
+    maxContentLength: MAX_DOWNLOAD_BYTES,
+    validateStatus: status => status >= 200 && status < 300,
+    timeout: 10_000,
+  });
+  return Buffer.from(response.data);
+}
+
+async function prepareRoleIconBuffer(sourceBuffer, formatHint) {
+  if (!sourceBuffer || !sourceBuffer.length) throw new Error('No image data found.');
+
+  let metadata;
+  try {
+    metadata = await sharp(sourceBuffer).metadata();
+  } catch (_) {
+    throw new Error('Could not read that image. Use a PNG or JPG file.');
+  }
+
+  const detectedFormat = metadata?.format ? metadata.format.toLowerCase() : null;
+  const normalizedFormat = detectedFormat || (formatHint ? formatHint.toLowerCase() : null);
+  if (!normalizedFormat || !ALLOWED_ICON_FORMATS.has(normalizedFormat)) {
+    throw new Error('Role icon must be a PNG or JPG image.');
+  }
+
+  const base = sharp(sourceBuffer).resize(ROLE_ICON_SIZE_PX, ROLE_ICON_SIZE_PX, { fit: 'cover' });
+  let outputBuffer;
+
+  if (normalizedFormat === 'jpeg' || normalizedFormat === 'jpg') {
+    outputBuffer = await base.clone().jpeg({ quality: 90 }).toBuffer();
+  } else {
+    outputBuffer = await base.clone().png().toBuffer();
+  }
+
+  if (outputBuffer.length > MAX_ROLE_ICON_BYTES) {
+    const jpegBuffer = await base.clone().jpeg({ quality: 85 }).toBuffer();
+    if (jpegBuffer.length <= MAX_ROLE_ICON_BYTES) {
+      return { buffer: jpegBuffer, format: 'jpeg' };
+    }
+    throw new Error('Role icon must be under 256KB after resizing to 64x64. Try a smaller image.');
+  }
+
+  return { buffer: outputBuffer, format: normalizedFormat === 'jpg' ? 'jpeg' : normalizedFormat };
 }
 
 async function getOrCreateVanityRole({ interaction, member, me, rec, name, colors, selectedRole }) {
@@ -320,6 +391,23 @@ module.exports = {
             .setDescription('New role name')
             .setRequired(true)
         )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('icon')
+        .setDescription('Set a 64x64 PNG/JPG icon on your vanity role')
+        .addAttachmentOption(opt =>
+          opt
+            .setName('file')
+            .setDescription('Upload a PNG/JPG under 256KB (will be resized to 64x64)')
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('url')
+            .setDescription('Direct PNG/JPG link under 256KB (will be resized to 64x64)')
+            .setRequired(false)
+        )
     ),
 
   async execute(interaction) {
@@ -369,6 +457,78 @@ module.exports = {
       }
 
       await interaction.deferReply({ ephemeral: true });
+
+      if (sub === 'icon') {
+        if (!rec?.roleId) return interaction.editReply({ content: 'No vanity role found. Run `/vanityrole setup` first.' });
+        const role = interaction.guild.roles.cache.get(rec.roleId) || await interaction.guild.roles.fetch(rec.roleId).catch(() => null);
+        if (!role) return interaction.editReply({ content: 'Your saved vanity role no longer exists. Run `/vanityrole setup` to recreate it.' });
+        if (role.managed) return interaction.editReply({ content: 'Your vanity role is managed and cannot be edited.' });
+        if (me.roles.highest.comparePositionTo(role) <= 0) return interaction.editReply({ content: 'My highest role must be above your vanity role.' });
+        const supportsRoleIcons = interaction.guild.features?.includes?.('ROLE_ICONS');
+        if (!supportsRoleIcons) return interaction.editReply({ content: 'This server does not support role icons.' });
+
+        const attachment = interaction.options.getAttachment('file');
+        const urlInputRaw = interaction.options.getString('url');
+        const urlInput = urlInputRaw ? urlInputRaw.trim() : '';
+
+        if (!attachment && !urlInput) {
+          return interaction.editReply({ content: 'Attach a PNG/JPG (64x64, under 256KB) or provide a direct image URL.' });
+        }
+        if (attachment?.contentType && !inferFormatFromContentType(attachment.contentType)) {
+          return interaction.editReply({ content: 'Role icon must be a PNG or JPG image.' });
+        }
+        if (attachment?.size && attachment.size > MAX_DOWNLOAD_BYTES) {
+          return interaction.editReply({ content: 'Image file is too large. Please use a PNG/JPG under 5MB.' });
+        }
+        if (urlInput && !/^https?:\/\//i.test(urlInput)) {
+          return interaction.editReply({ content: 'Provide a valid http(s) link to a PNG or JPG image.' });
+        }
+
+        const formatHint = attachment
+          ? inferFormatFromContentType(attachment.contentType) || inferFormatFromName(attachment.name)
+          : inferFormatFromName(urlInput);
+
+        const downloadUrl = attachment?.url || urlInput;
+        let downloaded;
+        try {
+          downloaded = await fetchImageBuffer(downloadUrl);
+        } catch (err) {
+          return interaction.editReply({ content: 'Could not download that image. Make sure the link is reachable and under 5MB.' });
+        }
+
+        let prepared;
+        try {
+          prepared = await prepareRoleIconBuffer(downloaded, formatHint);
+        } catch (err) {
+          return interaction.editReply({ content: err.message || 'Could not process that image.' });
+        }
+
+        const reason = `Vanity role icon set for ${interaction.user.tag} (${interaction.user.id}) via /vanityrole`;
+        try {
+          await role.setIcon(prepared.buffer, reason);
+        } catch (err) {
+          let msg = 'Failed to set that role icon.';
+          if (!supportsRoleIcons) {
+            msg = 'This server does not support role icons.';
+          } else if (err?.message?.toLowerCase?.().includes('role icon')) {
+            msg = 'This server may not support role icons or I lack permission to set them.';
+          }
+          return interaction.editReply({ content: msg });
+        }
+
+        try { await modlog.log(interaction, 'Vanity Role Icon Updated', {
+          target: `${interaction.user.tag} (${interaction.user.id})`,
+          reason: 'Updated vanity role icon',
+          extraFields: [
+            { name: 'Role', value: `${role} (${role.id})`, inline: false },
+            { name: 'Source', value: attachment ? 'Attachment' : 'Link', inline: true },
+            { name: 'Format', value: prepared.format || 'unknown', inline: true },
+            { name: 'Size', value: `${Math.ceil(prepared.buffer.length / 1024)} KB`, inline: true },
+          ],
+        }); } catch (_) {}
+
+        return interaction.editReply({ content: `Updated the icon for ${role}.` });
+      }
 
       if (sub === 'colour') {
         if (!rec?.roleId) return interaction.editReply({ content: 'No vanity role found. Run `/vanityrole setup` first.' });
