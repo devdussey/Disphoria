@@ -39,7 +39,7 @@ module.exports = {
                     option
                         .setName('description')
                         .setDescription('Embed description')
-                        .setRequired(true)
+                        .setRequired(false)
                 )
                 .addStringOption(option =>
                     option
@@ -98,6 +98,14 @@ module.exports = {
             const imageAttachment = interaction.options.getAttachment('image_upload');
             const thumbnailInput = interaction.options.getString('thumbnail');
             const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
+            const imageUrl = sanitiseUrl(imageInput);
+            const thumbUrl = sanitiseUrl(thumbnailInput);
+
+            if (!title && !description && !imageAttachment && !imageUrl && !thumbUrl) {
+                return interaction.editReply({
+                    content: 'Please provide at least one embed field (title, description, image, or thumbnail).'
+                });
+            }
 
             try {
                 const colour = parseColorInput(colorInput, 0x5865f2);
@@ -118,12 +126,10 @@ module.exports = {
                     files.push({ attachment: imageAttachment.url, name: filename });
                     embed.setImage(`attachment://${filename}`);
                 } else {
-                    const image = sanitiseUrl(imageInput);
-                    if (image) embed.setImage(image);
+                    if (imageUrl) embed.setImage(imageUrl);
                 }
 
-                const thumb = sanitiseUrl(thumbnailInput);
-                if (thumb) embed.setThumbnail(thumb);
+                if (thumbUrl) embed.setThumbnail(thumbUrl);
 
                 // Send the embed to the chosen channel
                 await targetChannel.send({
