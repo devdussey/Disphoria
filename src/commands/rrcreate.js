@@ -205,14 +205,14 @@ module.exports = {
       return interaction.editReply({ content: 'That message already has the maximum number of component rows.' });
     }
 
-    let embedMerge = { ok: true, embeds: [] };
+    let embedMerge = { ok: true, embeds: targetMessage.embeds || [] };
     if (showCounts) {
       const summary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild);
       embedMerge = reactionRoleManager.mergeSummaryEmbed(
         targetMessage.embeds,
         summary.embed,
         panel,
-        { replaceAll: true, useFirstMediaEmbed: true },
+        {},
       );
       if (!embedMerge.ok) {
         reactionRoleStore.removePanel(interaction.guildId, panel.id);

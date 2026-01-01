@@ -478,14 +478,14 @@ module.exports = {
                 const view = reactionRoleManager.buildMenuRow(panel, interaction.guild);
                 const merged = reactionRoleManager.upsertMenuRow(interaction.message.components, view.customId, view.row);
 
-                let embedMerge = { ok: true, embeds: [] };
+                let embedMerge = { ok: true, embeds: interaction.message.embeds || [] };
                 if (panel.showCounts !== false) {
                     const summary = reactionRoleManager.buildSummaryEmbed(panel, interaction.guild);
                     embedMerge = reactionRoleManager.mergeSummaryEmbed(
                         interaction.message.embeds,
                         summary.embed,
                         panel,
-                        { replaceAll: true, useFirstMediaEmbed: true },
+                        {},
                     );
                 }
 

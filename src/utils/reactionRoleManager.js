@@ -14,10 +14,6 @@ function normaliseEmbeds(embeds) {
     .filter(Boolean);
 }
 
-function hasMedia(embed) {
-  return Boolean(embed?.image || embed?.video || embed?.thumbnail);
-}
-
 function hasMeaningfulText(embed) {
   if (!embed) return false;
   if (embed.title || embed.description) return true;
@@ -164,52 +160,12 @@ function isSummaryEmbed(embed, panelId, roleIds) {
 }
 
 function mergeSummaryEmbed(existingEmbeds, summaryEmbed, panel, opts = {}) {
-  const replaceAll = opts.replaceAll === true;
-  const combineWithMediaEmbed = opts.combineWithMediaEmbed === true && !replaceAll;
-  const useFirstMediaEmbed = opts.useFirstMediaEmbed === true;
-  const dropMediaEmbeds = combineWithMediaEmbed ? false : opts.dropMediaEmbeds === true;
-
-  let embeds = normaliseEmbeds(existingEmbeds);
-  const mediaSource = useFirstMediaEmbed ? embeds.find(hasMedia) || null : null;
-
-  if (!replaceAll && dropMediaEmbeds) {
-    embeds = embeds.filter(embed => {
-      const media = hasMedia(embed);
-      const hasText = hasMeaningfulText(embed);
-      // Drop pure media previews (e.g., link/attachment previews) to avoid double banners.
-      return !(media && !hasText);
-    });
-  }
+  const embeds = normaliseEmbeds(existingEmbeds);
   const summaryJson = typeof summaryEmbed?.toJSON === 'function' ? summaryEmbed.toJSON() : summaryEmbed;
   if (!summaryJson) return { ok: false, error: 'invalid_summary', embeds };
-
-  if (mediaSource) {
-    if (!summaryJson.image && mediaSource.image) summaryJson.image = mediaSource.image;
-    if (!summaryJson.image && !mediaSource.image && mediaSource.thumbnail) summaryJson.image = mediaSource.thumbnail;
-    if (!summaryJson.color && mediaSource.color) summaryJson.color = mediaSource.color;
-  }
-
   const panelId = panel?.id || panel;
   const roleIds = Array.isArray(panel?.roleIds) ? panel.roleIds : [];
-  const filtered = replaceAll ? [] : embeds.filter(e => !isSummaryEmbed(e, panelId, roleIds));
-
-  // Try to fold the summary into an existing media embed so the counts sit with the image.
-  if (combineWithMediaEmbed) {
-    const mediaIndex = filtered.findIndex(hasMedia);
-    if (mediaIndex !== -1) {
-      const combined = JSON.parse(JSON.stringify(filtered[mediaIndex] || {}));
-      const summaryText = (summaryJson.description || '').trim();
-      if (summaryText) {
-        const footerText = (combined.footer?.text || '').trim();
-        const nextFooter = footerText ? `${footerText}\n${summaryText}` : summaryText;
-        combined.footer = { ...(combined.footer || {}), text: nextFooter.slice(0, 2048) };
-      }
-      if (!combined.color && summaryJson.color) combined.color = summaryJson.color;
-      filtered[mediaIndex] = combined;
-      return { ok: true, embeds: filtered, replaced: true, inserted: false, combined: true };
-    }
-  }
-
+  const filtered = embeds.filter(e => !isSummaryEmbed(e, panelId, roleIds));
   if (filtered.length === embeds.length && embeds.length >= 10) {
     return { ok: false, error: 'max_embeds', embeds };
   }
