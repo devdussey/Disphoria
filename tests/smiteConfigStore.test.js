@@ -28,7 +28,9 @@ test('defaults to enabled when no config exists', async () => {
   await withTempStore(async store => {
     const config = store.getConfig('guild');
     assert.equal(config.enabled, true);
+    assert.deepEqual(config.immuneRoleIds, []);
     assert.equal(store.isEnabled('guild'), true);
+    assert.deepEqual(store.getImmuneRoleIds('guild'), []);
   });
 });
 
@@ -49,5 +51,27 @@ test('setEnabled persists preference to disk', async () => {
     delete require.cache[modulePath];
     const reloaded = require(modulePath);
     assert.equal(reloaded.isEnabled(guildId), false);
+    assert.deepEqual(reloaded.getImmuneRoleIds(guildId), []);
+  });
+});
+
+test('immune roles can be added, removed, and persisted', async () => {
+  await withTempStore(async (store, dir) => {
+    const guildId = 'guild';
+    await store.addImmuneRole(guildId, '123');
+    await store.addImmuneRole(guildId, '456');
+    await store.addImmuneRole(guildId, '123'); // dedupe
+
+    let config = store.getConfig(guildId);
+    assert.deepEqual(config.immuneRoleIds.sort(), ['123', '456']);
+
+    await store.removeImmuneRole(guildId, '123');
+    config = store.getConfig(guildId);
+    assert.deepEqual(config.immuneRoleIds, ['456']);
+
+    // Persisted to disk
+    const file = path.join(process.env.DISPHORIABOT_DATA_DIR, 'smite_config.json');
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(saved.guilds[guildId].immuneRoleIds, ['456']);
   });
 });

@@ -4,11 +4,28 @@ const smiteConfigStore = require('../utils/smiteConfigStore');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('rupeeconfig')
-    .setDescription('Enable or disable Rupee rewards')
+    .setDescription('Configure Smite/Rupee rewards and immunity roles')
     .addBooleanOption(opt =>
       opt
         .setName('enabled')
         .setDescription('Turn Rupee rewards on or off')
+        .setRequired(false)
+    )
+    .addRoleOption(opt =>
+      opt
+        .setName('immune_role')
+        .setDescription('Role to add or remove from the Smite immunity list')
+        .setRequired(false)
+    )
+    .addStringOption(opt =>
+      opt
+        .setName('immune_action')
+        .setDescription('Whether to add or remove the immune role (defaults to add).')
+        .addChoices(
+          { name: 'Add', value: 'add' },
+          { name: 'Remove', value: 'remove' },
+          { name: 'Clear all', value: 'clear' },
+        )
         .setRequired(false)
     ),
 
@@ -24,14 +41,53 @@ module.exports = {
     }
 
     const choice = interaction.options.getBoolean('enabled');
-    if (choice === null) {
-      const current = smiteConfigStore.getConfig(interaction.guildId);
-      const status = current.enabled ? 'enabled' : 'disabled';
-      return interaction.editReply({ content: `Smite rewards are currently **${status}** on this server.` });
+    const immuneRole = interaction.options.getRole('immune_role');
+    const immuneAction = interaction.options.getString('immune_action') || 'add';
+
+    const hasRoleChange = immuneAction === 'clear' || !!immuneRole;
+    if (immuneRole && immuneAction === 'clear') {
+      return interaction.editReply({ content: 'Select add or remove when specifying an immune role.' });
     }
 
-    const result = await smiteConfigStore.setEnabled(interaction.guildId, choice);
-    const status = result.enabled ? 'enabled' : 'disabled';
-    await interaction.editReply({ content: `Rupee rewards have been **${status}**.` });
+    const updates = [];
+    let config = smiteConfigStore.getConfig(interaction.guildId);
+
+    if (choice !== null) {
+      config = await smiteConfigStore.setEnabled(interaction.guildId, choice);
+      const status = config.enabled ? 'enabled' : 'disabled';
+      updates.push(`Smite rewards have been **${status}**.`);
+    }
+
+    if (hasRoleChange) {
+      if (immuneAction === 'clear') {
+        config = await smiteConfigStore.setImmuneRoleIds(interaction.guildId, []);
+        updates.push('Cleared all Smite immune roles.');
+      } else if (immuneAction === 'remove') {
+        config = await smiteConfigStore.removeImmuneRole(interaction.guildId, immuneRole.id);
+        updates.push(`Removed ${immuneRole} from the Smite immune list.`);
+      } else {
+        config = await smiteConfigStore.addImmuneRole(interaction.guildId, immuneRole.id);
+        updates.push(`Added ${immuneRole} to the Smite immune list.`);
+      }
+    }
+
+    if (!updates.length) {
+      const status = config.enabled ? 'enabled' : 'disabled';
+      const immune = config.immuneRoleIds;
+      const immuneList = immune.length
+        ? immune.map(id => `<@&${id}>`).join(', ')
+        : 'None';
+      return interaction.editReply({
+        content: `Smite rewards are currently **${status}** on this server.\nImmune roles: ${immuneList}.`,
+      });
+    }
+
+    const immune = config.immuneRoleIds;
+    const immuneList = immune.length
+      ? immune.map(id => `<@&${id}>`).join(', ')
+      : 'None';
+    await interaction.editReply({
+      content: `${updates.join(' ')}\nImmune roles: ${immuneList}.`,
+    });
   },
 };

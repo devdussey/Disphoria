@@ -7,15 +7,7 @@ const modLogger = require('../utils/modLogger');
 const { getSmiteCost } = require('../utils/economyConfig');
 
 const BAG_LABEL = 'Smite';
-const MAX_MINUTES = 10;
-const PROTECTED_PERMISSIONS = new PermissionsBitField([
-  PermissionsBitField.Flags.Administrator,
-  PermissionsBitField.Flags.ModerateMembers,
-  PermissionsBitField.Flags.ManageGuild,
-  PermissionsBitField.Flags.ManageRoles,
-  PermissionsBitField.Flags.KickMembers,
-  PermissionsBitField.Flags.BanMembers,
-]);
+const MAX_MINUTES = 2;
 
 function formatCoins(value) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -30,7 +22,7 @@ function formatMinutes(value) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('stfu')
-    .setDescription('Spend a Smite to silence a non-staff user for 10 minutes')
+    .setDescription('Spend a Smite to silence a user for up to 2 minutes')
     .addUserOption(opt =>
       opt
         .setName('target')
@@ -40,7 +32,7 @@ module.exports = {
     .addIntegerOption(opt =>
       opt
         .setName('duration')
-        .setDescription('Timeout duration in minutes (1-10). Defaults to 10 minutes.')
+        .setDescription('Timeout duration in minutes (1-2). Defaults to 2 minutes.')
         .setMinValue(1)
         .setMaxValue(MAX_MINUTES)
     )
@@ -56,9 +48,11 @@ module.exports = {
       return interaction.reply({ content: 'Use this command in a server.', ephemeral: true });
     }
 
-    if (!smiteConfigStore.isEnabled(interaction.guildId)) {
+    const smiteConfig = smiteConfigStore.getConfig(interaction.guildId);
+    if (!smiteConfig.enabled) {
       return interaction.reply({ content: 'Smite is disabled on this server.', ephemeral: true });
     }
+    const immuneRoleIds = new Set(smiteConfig.immuneRoleIds || []);
 
     await interaction.deferReply({ ephemeral: true });
 
@@ -116,24 +110,20 @@ module.exports = {
       return interaction.editReply({ content: 'That user is not in this server.' });
     }
 
-    if (targetMember.permissions.has(PROTECTED_PERMISSIONS)) {
-      await securityLogger.logPermissionDenied(interaction, 'stfu', 'Target has protected permissions', [
+    const immuneRoles = targetMember.roles.cache.filter(role => immuneRoleIds.has(role.id));
+    if (immuneRoles.size > 0) {
+      const immuneList = immuneRoles.map(role => role.toString()).join(', ');
+      await securityLogger.logPermissionDenied(interaction, 'stfu', 'Target has Smite immune role', [
         { name: 'Target', value: `${targetUser.tag} (${targetUser.id})`, inline: false },
+        { name: 'Immune Roles', value: immuneList, inline: false },
       ]);
-      return interaction.editReply({ content: 'You cannot spend Smites on moderators or administrators.' });
+      return interaction.editReply({ content: `You cannot spend Smites on members with immune roles. Roles: ${immuneList}` });
     }
 
     const meHigher = me.roles.highest.comparePositionTo(targetMember.roles.highest) > 0;
     if (!meHigher || !targetMember.moderatable) {
       await securityLogger.logHierarchyViolation(interaction, 'stfu', targetMember, 'Bot lower than target or not moderatable');
       return interaction.editReply({ content: "I can't timeout that member due to role hierarchy or permissions." });
-    }
-
-    const requesterNotLower = interaction.member.roles.highest.comparePositionTo(targetMember.roles.highest) >= 0
-      || interaction.guild.ownerId === interaction.user.id;
-    if (!requesterNotLower) {
-      await securityLogger.logHierarchyViolation(interaction, 'stfu', targetMember, 'Requester lower than target');
-      return interaction.editReply({ content: "You can't timeout someone with a higher role." });
     }
 
     const durationInput = interaction.options.getInteger('duration');
