@@ -157,10 +157,28 @@ function removePanel(guildId, panelId) {
   return sanitisePanel(panel);
 }
 
+function updatePanel(guildId, panelId, updates) {
+  const guild = ensureGuild(guildId);
+  const key = String(panelId);
+  const current = guild.panels[key];
+  if (!current) return null;
+  const next = sanitisePanel({
+    ...current,
+    ...updates,
+    id: current.id,
+    guildId: String(guildId),
+  });
+  if (!next) return null;
+  guild.panels[key] = next;
+  persist();
+  return { ...next, roleIds: next.roleIds.slice() };
+}
+
 module.exports = {
   createPanel,
   getPanel,
   findPanelByMessageId,
   listPanels,
   removePanel,
+  updatePanel,
 };
