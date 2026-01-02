@@ -7,7 +7,7 @@ const modLogger = require('../utils/modLogger');
 const { getSmiteCost } = require('../utils/economyConfig');
 
 const BAG_LABEL = 'Smite';
-const MAX_MINUTES = 2;
+const MAX_MINUTES = 5;
 
 function formatCoins(value) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -22,7 +22,7 @@ function formatMinutes(value) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('stfu')
-    .setDescription('Spend a Smite to silence a user for up to 2 minutes')
+    .setDescription('Spend a Smite to silence a user for up to 5 minutes')
     .addUserOption(opt =>
       opt
         .setName('target')
@@ -32,7 +32,7 @@ module.exports = {
     .addIntegerOption(opt =>
       opt
         .setName('duration')
-        .setDescription('Timeout duration in minutes (1-2). Defaults to 2 minutes.')
+        .setDescription('Timeout duration in minutes (1-5). Defaults to 5 minutes.')
         .setMinValue(1)
         .setMaxValue(MAX_MINUTES)
     )
