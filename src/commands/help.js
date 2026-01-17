@@ -14,6 +14,7 @@ const categories = {
     { cmd: '/kick', desc: 'Remove a member from the server with a required reason', perm: 'Kick Members' },
     { cmd: '/ban', desc: 'Ban a member with optional message pruning (reason required)', perm: 'Ban Members' },
     { cmd: '/purge', desc: 'Bulk delete 1-100 recent messages in the current channel', perm: 'Manage Messages' },
+    { cmd: '/automodconfig', desc: 'Configure AI automod, log channel, and flag terms', perm: 'Administrator' },
     { cmd: '/blacklist add/remove/list', desc: 'Maintain a join blacklist that automatically bans flagged users', perm: 'Ban Members' },
     { cmd: '/jail config/add/remove/status', desc: 'Temporarily strip roles, isolate members, and restore them later', perm: 'Manage Roles' },
     { cmd: '/rupeeconfig', desc: 'Enable or disable Smite rewards and redemption', perm: 'Manage Server' },
