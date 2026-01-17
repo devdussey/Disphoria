@@ -71,6 +71,8 @@ module.exports = {
       const guildId = message.guild.id;
       const config = automodConfigStore.getConfig(guildId);
       if (!config.enabled) return;
+      const whitelist = new Set(Array.isArray(config.whitelistUserIds) ? config.whitelistUserIds : []);
+      if (whitelist.has(message.author.id)) return;
       const flagTerms = Array.isArray(config.flags) ? config.flags : [];
       if (!flagTerms.length) return;
 

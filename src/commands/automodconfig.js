@@ -19,7 +19,32 @@ function parseFlags(raw) {
   return parts.length ? parts : [];
 }
 
+function parseWhitelist(raw) {
+  if (!raw) return null;
+  const parts = raw
+    .split(/[\n,]+/g)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(part => {
+      const match = part.match(/\d{15,20}/);
+      return match ? match[0] : null;
+    })
+    .filter(Boolean);
+  const unique = Array.from(new Set(parts));
+  return unique.length ? unique : [];
+}
+
+function formatWhitelist(ids) {
+  if (!Array.isArray(ids) || !ids.length) return '_No whitelist set._';
+  return ids.map(id => `- <@${id}>`).join('\n').slice(0, 1024);
+}
+
 function makeEmbed(guildId, config) {
+  const flagField = config.flags.length
+    ? config.flags.map(f => `- ${f}`).join('\n').slice(0, 1024)
+    : '_No terms set._';
+  const whitelistField = formatWhitelist(config.whitelistUserIds);
+
   return new EmbedBuilder()
     .setColor(resolveEmbedColour(guildId, 0x5865f2))
     .setTitle('AI Automod Configuration')
@@ -33,7 +58,12 @@ function makeEmbed(guildId, config) {
       },
       {
         name: 'Flag terms',
-        value: config.flags.length ? config.flags.map(f => `• ${f}`).join('\n').slice(0, 1024) : '_No terms set._',
+        value: flagField,
+        inline: false,
+      },
+      {
+        name: 'Whitelisted users',
+        value: whitelistField,
         inline: false,
       },
       {
@@ -68,6 +98,11 @@ module.exports = {
         .setName('flag_terms')
         .setDescription('Comma or newline separated list of words/phrases to flag'),
     )
+    .addStringOption(opt =>
+      opt
+        .setName('whitelist_users')
+        .setDescription('Comma or newline separated user IDs or @mentions to ignore'),
+    )
     .setDMPermission(false),
 
   async execute(interaction) {
@@ -80,6 +115,7 @@ module.exports = {
     const guildId = interaction.guildId;
     const logChannel = interaction.options.getChannel('log_channel');
     const flagsRaw = interaction.options.getString('flag_terms');
+    const whitelistRaw = interaction.options.getString('whitelist_users');
 
     const updates = {};
     if (logChannel) {
@@ -88,6 +124,10 @@ module.exports = {
     const parsedFlags = parseFlags(flagsRaw);
     if (parsedFlags) {
       updates.flags = parsedFlags;
+    }
+    const parsedWhitelist = parseWhitelist(whitelistRaw);
+    if (parsedWhitelist) {
+      updates.whitelistUserIds = parsedWhitelist;
     }
 
     let config = automodConfigStore.getConfig(guildId);

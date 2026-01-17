@@ -2,7 +2,7 @@ const fs = require('fs');
 const { ensureFileSync, resolveDataPath, writeJson } = require('./dataDir');
 
 const STORE_FILE = 'automod_config.json';
-const DEFAULT_CONFIG = { enabled: false, logChannelId: null, flags: [] };
+const DEFAULT_CONFIG = { enabled: false, logChannelId: null, flags: [], whitelistUserIds: [] };
 
 let cache = null;
 
@@ -41,10 +41,14 @@ function getConfig(guildId) {
   const raw = store.guilds[guildId];
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_CONFIG };
   const flags = Array.isArray(raw.flags) ? raw.flags.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim()) : [];
+  const whitelistUserIds = Array.isArray(raw.whitelistUserIds)
+    ? Array.from(new Set(raw.whitelistUserIds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim())))
+    : [];
   return {
     enabled: Boolean(raw.enabled),
     logChannelId: raw.logChannelId || null,
     flags,
+    whitelistUserIds,
   };
 }
 
@@ -63,6 +67,14 @@ async function updateConfig(guildId, updates = {}) {
       .filter(f => typeof f === 'string')
       .map(f => f.trim())
       .filter(f => f.length > 0);
+  }
+  if (Array.isArray(updates.whitelistUserIds)) {
+    entry.whitelistUserIds = Array.from(new Set(
+      updates.whitelistUserIds
+        .filter(id => typeof id === 'string')
+        .map(id => id.trim())
+        .filter(id => id.length > 0),
+    ));
   }
   await persist();
   return getConfig(guildId);
