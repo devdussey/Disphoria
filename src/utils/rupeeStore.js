@@ -114,6 +114,17 @@ async function consumeToken(guildId, userId) {
   return true;
 }
 
+async function spendTokens(guildId, userId, amount = 1) {
+  if (!guildId || !userId) return false;
+  const num = Math.max(0, Math.floor(Number(amount) || 0));
+  if (num === 0) return true;
+  const rec = ensureRecord(guildId, userId);
+  if (rec.tokens < num) return false;
+  rec.tokens -= num;
+  await saveStore();
+  return true;
+}
+
 async function addTokens(guildId, userId, amount = 1) {
   if (!guildId || !userId) return 0;
   const num = Number(amount) || 0;
@@ -168,6 +179,7 @@ module.exports = {
   AWARD_THRESHOLD,
   incrementMessage,
   consumeToken,
+  spendTokens,
   addTokens,
   getBalance,
   getProgress,

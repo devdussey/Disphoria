@@ -1,7 +1,8 @@
-const { Events } = require('discord.js');
+const { Events, EmbedBuilder } = require('discord.js');
 const messageLogStore = require('../utils/userMessageLogStore');
 const rupeeStore = require('../utils/rupeeStore');
 const smiteConfigStore = require('../utils/smiteConfigStore');
+const { resolveEmbedColour } = require('../utils/guildColourStore');
 
 module.exports = {
   name: Events.MessageCreate,
@@ -22,9 +23,14 @@ module.exports = {
       if (!result?.awarded || result.awarded <= 0) return;
 
       const newBalance = Number.isFinite(result.tokens) ? result.tokens : rupeeStore.getBalance(message.guild.id, message.author.id);
-      const earnedText = result.awarded === 1 ? 'a rupee' : `${result.awarded} rupees`;
+      const amountText = result.awarded === 1 ? 'a rupee' : `${result.awarded} rupees`;
+      const earnedText = `${message.author} has earned ${amountText}! They now have ${newBalance}!`;
+      const embed = new EmbedBuilder()
+        .setColor(resolveEmbedColour(message.guild.id, 0x00f0ff))
+        .setDescription(`${earnedText}\n\nTo spend your rupees, type /rupeeshop.`)
+        .setThumbnail(message.author.displayAvatarURL({ extension: 'png', size: 256 }));
       try {
-        await message.channel?.send({ content: `<@${message.author.id}> earned ${earnedText}, they now have ${newBalance}.` });
+        await message.channel?.send({ embeds: [embed] });
       } catch (_) {}
     } catch (err) {
       console.error('Failed to award rupees', err);

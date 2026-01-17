@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js'
 const { loadCommands } = require('./handlers/commandHandler');
 const { loadEvents } = require('./handlers/eventHandler');
 require('dotenv').config();
+require('./utils/embedColourEnforcer');
 
 const client = new Client({
     intents: [

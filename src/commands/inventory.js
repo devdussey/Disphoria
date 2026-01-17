@@ -1,14 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const coinStore = require('../utils/coinStore');
-const tokenStore = require('../utils/messageTokenStore');
 const rupeeStore = require('../utils/rupeeStore');
-const smiteConfigStore = require('../utils/smiteConfigStore');
 const { resolveEmbedColour } = require('../utils/guildColourStore');
-const {
-  getSmiteCost,
-  getRupeeCost,
-  getPrayReward,
-} = require('../utils/economyConfig');
+const { getRupeeCost, getPrayReward } = require('../utils/economyConfig');
 
 function formatCoins(value) {
   return Number(value).toLocaleString(undefined, {
@@ -33,11 +27,8 @@ function buildInventoryEmbed({
   guildId,
   user,
   coinSummary,
-  smiteBalance,
-  smiteCost,
   rupeeBalance,
   rupeeCost,
-  smiteEnabled,
   prayStatus,
   prayReward,
 }) {
@@ -54,28 +45,22 @@ function buildInventoryEmbed({
     )
     .addFields(
       {
-        name: '🪙 Coins',
+        name: '💰 Coins',
         value: `**Balance:** ${formatCoins(coinSummary.coins)}\n**Ledger:** Earned ${formatCoins(
           coinSummary.lifetimeEarned
-        )} · Spent ${formatCoins(
+        )} | Spent ${formatCoins(
           coinSummary.lifetimeSpent
-        )}\nCoins are the divine currency for all purchases, including empowering Smites and unlocking Rupees.`,
-      },
-      {
-        name: '⚡ Smites',
-        value: `**Owned:** ${smiteBalance}\n**Cost:** ${formatCoins(
-          smiteCost
-        )} coins each\nCall down righteous lightning to discipline wrongdoers using the /stfu command. ${
-          smiteEnabled
-            ? 'Smite rewards are currently **enabled** on this server.'
-            : 'Smite rewards are currently **disabled** on this server.'
-        }`,
+        )}\nCoins are the base currency for other features and upgrades.`,
       },
       {
         name: '💎 Rupees',
         value: `**Owned:** ${rupeeBalance}\n**Cost:** ${formatCoins(
           rupeeCost
-        )} coins each\nRupees unlock the powerful /analysis command and can also be bestowed by moderators using /giverupee.`,
+        )} coins each\nRupees unlock the powerful /analysis command, can be bestowed by moderators using /giverupee, and are spent in /rupeeshop.`,
+      },
+      {
+        name: '🏪 Rupee Shop',
+        value: 'Visit `/rupeeshop` to buy items like **STFU** (5 rupees) to silence a user or **Abuse Mod** (5 rupees) to timeout a moderator for 5 minutes.',
       }
     );
 
@@ -112,11 +97,8 @@ module.exports = {
     const userId = interaction.user.id;
 
     const coinSummary = coinStore.getSummary(guildId, userId);
-    const smiteBalance = tokenStore.getBalance(guildId, userId);
-    const smiteCost = getSmiteCost();
     const rupeeBalance = rupeeStore.getBalance(guildId, userId);
     const rupeeCost = getRupeeCost();
-    const smiteEnabled = smiteConfigStore.isEnabled(guildId);
     const prayStatus = coinStore.getPrayStatus(guildId, userId);
     const prayReward = getPrayReward();
 
@@ -124,11 +106,8 @@ module.exports = {
       guildId,
       user: interaction.user,
       coinSummary,
-      smiteBalance,
-      smiteCost,
       rupeeBalance,
       rupeeCost,
-      smiteEnabled,
       prayStatus,
       prayReward,
     });

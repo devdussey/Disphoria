@@ -13,10 +13,9 @@ const categories = {
     { cmd: '/mute', desc: 'Timeout a member for a set duration (reason required)', perm: 'Moderate Members' },
     { cmd: '/kick', desc: 'Remove a member from the server with a required reason', perm: 'Kick Members' },
     { cmd: '/ban', desc: 'Ban a member with optional message pruning (reason required)', perm: 'Ban Members' },
-    { cmd: '/purge', desc: 'Bulk delete 1–100 recent messages in the current channel', perm: 'Manage Messages' },
+    { cmd: '/purge', desc: 'Bulk delete 1-100 recent messages in the current channel', perm: 'Manage Messages' },
     { cmd: '/blacklist add/remove/list', desc: 'Maintain a join blacklist that automatically bans flagged users', perm: 'Ban Members' },
     { cmd: '/jail config/add/remove/status', desc: 'Temporarily strip roles, isolate members, and restore them later', perm: 'Manage Roles' },
-    { cmd: '/stfu', desc: 'Spend a Smite to silence a non-staff user for ten minutes', perm: null },
     { cmd: '/rupeeconfig', desc: 'Enable or disable Smite rewards and redemption', perm: 'Manage Server' },
   ],
   'Roles & Identity': [
@@ -60,8 +59,9 @@ const categories = {
     { cmd: '/setdefaultcolour & /getdefaultcolour', desc: 'Quick commands to update or view the default embed colour', perm: 'Manage Server (setdefaultcolour)' },
   ],
   'Economy & Games': [
-    { cmd: '/inventory', desc: 'Check your coins plus available Smites and Rupees', perm: null },
+    { cmd: '/inventory', desc: 'Check your coins and rupees', perm: null },
     { cmd: '/viewrupees', desc: 'Admins: view a rupee balance leaderboard for the server', perm: 'Administrator' },
+    { cmd: '/rupeeshop', desc: 'Spend rupees on shop items like STFU and Abuse Mod', perm: null },
     { cmd: '/pray', desc: 'Pray once per day to receive a coin blessing', perm: null },
     { cmd: '/horserace', desc: 'Host a chaotic horse race mini-game with your server', perm: null },
     { cmd: '/horseracestandings', desc: 'Review historical podium finishes or personal stats', perm: null },

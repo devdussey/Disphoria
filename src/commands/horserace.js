@@ -2,6 +2,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   ModalBuilder,
   SlashCommandBuilder,
   TextInputBuilder,
@@ -9,15 +10,19 @@ const {
   escapeMarkdown,
 } = require('discord.js');
 const { recordRace } = require('../utils/horseRaceStore');
-const coinStore = require('../utils/coinStore');
-const { getRaceEntryFee, getRaceRewards } = require('../utils/economyConfig');
+const rupeeStore = require('../utils/rupeeStore');
+const { resolveEmbedColour } = require('../utils/guildColourStore');
 
 const TRACK_SLOTS = 80;
-const TICK_DELAY_MS = 1200;
-const MAX_TICKS = 72;
+const TICK_DELAY_MS = 3_000; // Live update cadence
+const MAX_TICKS = 32;
 const JOIN_WINDOW_MS = 60_000;
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 8; // command issuer + up to 7 more
+const ENTRY_COST = 1;
+const BET_COST = 1;
+const PLACEMENT_REWARDS = [3, 2, 1];
+const RACE_COLOR_FALLBACK = 0x00f0ff;
 const NPC_HORSES = [
   'Blaze',
   'Comet',
@@ -32,34 +37,29 @@ const NPC_HORSES = [
 ];
 const PLACE_EMOJIS = ['🥇', '🥈', '🥉'];
 
-function formatNumber(num, fractionDigits = 0) {
-  return Number(num).toLocaleString(undefined, {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  });
-}
-
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function getEmbedColour(guildId) {
+  return resolveEmbedColour(guildId, RACE_COLOR_FALLBACK);
+}
+
+function makeEmbed(guildId) {
+  return new EmbedBuilder().setColor(getEmbedColour(guildId));
+}
+
 function renderTrack(position) {
-  const slots = Math.max(4, TRACK_SLOTS);
+  const slots = Math.max(12, TRACK_SLOTS);
   const finishIndex = slots - 1;
-  const arr = Array(slots).fill('·');
+  const arr = Array(slots).fill('—');
   const clamped = Math.max(0, Math.min(position, finishIndex));
-  arr[clamped] = '🐎';
+  arr[clamped] = '🏇';
   return `${arr.join('')}🏁`;
 }
 
-function renderRace(horses, finishOrder, { finished, tick, oddsMap }) {
-  const header = finished
-    ? '**🏁 Horse Race — Final Standings**'
-    : tick > 0
-      ? `**🏇 Horse Race — Turn ${tick}**`
-      : '**🏇 Horse Race**';
-
-  const lines = horses.map((horse, index) => {
+function renderRaceLines(horses, finishOrder, betTotals) {
+  return horses.map((horse, index) => {
     const lane = `\`${String(index + 1).padStart(2, '0')}\``;
     const track = renderTrack(horse.position);
     const nameRaw = horse.shortName || horse.name || `Horse ${index + 1}`;
@@ -75,71 +75,44 @@ function renderRace(horses, finishOrder, { finished, tick, oddsMap }) {
     } else if (horse.isPlayer) {
       suffix = ' ⭐';
     }
-    const odds = oddsMap?.get(horse.id);
-    const oddsText = odds ? ` _(odds ${formatNumber(odds, 2)}x)_` : '';
-    return `${lane} ${track} ${label}${suffix}${oddsText}`;
+    const betCount = betTotals.get(horse.id) || 0;
+    const betText = betCount > 0 ? ` · Bets: ${betCount}` : '';
+    return `${lane} ${track} ${label}${suffix}${betText}`;
   });
-
-  const footer = finished ? '_Race complete!_' : '_Cheer on your favourite horse!_';
-  return `${header}\n\n${lines.join('\n')}\n\n${footer}`;
 }
 
-function renderBettingSummary(horses, betTotals, totalPool, oddsMap) {
-  if (!horses.length) return '_No racers yet._';
+function summarizeBets(horses, bets) {
+  const betTotals = new Map();
+  for (const bet of bets.values()) {
+    if (!bet) continue;
+    betTotals.set(bet.horseId, (betTotals.get(bet.horseId) || 0) + 1);
+  }
+  return {
+    betTotals,
+    totalBets: bets.size,
+  };
+}
 
-  const headline = totalPool > 0
-    ? `**Betting Pool — ${formatNumber(totalPool)} coins total**`
-    : '**Betting Pool — No bets placed yet**';
+function renderBettingSummary(horses, betTotals, totalBets) {
+  if (!horses.length) return '_No racers yet._';
+  const headline = totalBets > 0
+    ? `**Bets — ${totalBets} rupee${totalBets === 1 ? '' : 's'} in play**`
+    : '**Bets — No rupees in play yet**';
 
   const lines = horses.map((horse, index) => {
-    const horseTotal = betTotals.get(horse.id) || 0;
-    const odds = oddsMap.get(horse.id) || 0;
+    const count = betTotals.get(horse.id) || 0;
     const nameRaw = horse.shortName || horse.name || `Horse ${index + 1}`;
     const safeName = escapeMarkdown(nameRaw).slice(0, 32);
-    const betText = horseTotal > 0
-      ? `${formatNumber(horseTotal)} coins`
-      : 'No bets';
-    const oddsText = odds ? `${formatNumber(odds, 2)}x` : '—';
-    return `• \`${String(index + 1).padStart(2, '0')}\` ${safeName} — ${betText} _(odds ${oddsText})_`;
+    const betText = count === 0 ? 'No bets' : `${count} bet${count === 1 ? '' : 's'} (1💎 each)`;
+    return `• \`${String(index + 1).padStart(2, '0')}\` ${safeName} — ${betText}`;
   });
 
   return `${headline}\n${lines.join('\n')}`;
 }
 
-function calculateBettingState(horses, bets) {
-  const betTotals = new Map();
-  let totalPool = 0;
-
-  for (const bet of bets.values()) {
-    if (!bet) continue;
-    const amount = Number(bet.amount);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-    const current = betTotals.get(bet.horseId) || 0;
-    betTotals.set(bet.horseId, current + amount);
-    totalPool += amount;
-  }
-
-  const oddsMap = new Map();
-  const basePool = totalPool > 0 ? totalPool : horses.length * 120;
-
-  for (const horse of horses) {
-    const horseTotal = betTotals.get(horse.id) || 0;
-    const remainingDistance = Math.max(0, (TRACK_SLOTS - 1) - horse.position);
-    const progressFactor = (remainingDistance + 1) / TRACK_SLOTS; // 0-1 range
-    const effectiveStake = horseTotal + 60;
-    let multiplier = (basePool + horses.length * 90) / effectiveStake;
-    multiplier *= 0.6 + progressFactor * 0.8;
-    multiplier = Math.max(1.1, Math.min(multiplier, 25));
-    oddsMap.set(horse.id, multiplier);
-  }
-
-  return { betTotals, totalPool, oddsMap };
-}
-
-function renderWaitingState(horses, joinDeadline, betsState, entryFee) {
+function renderWaitingState(horses, joinDeadline, betTotals, totalBets) {
   const now = Date.now();
   const secondsLeft = Math.max(0, Math.ceil((joinDeadline - now) / 1000));
-  const header = '**🏁 Horse Race Lobby**';
   const description = horses.length
     ? horses
       .map((horse, index) => {
@@ -149,21 +122,18 @@ function renderWaitingState(horses, joinDeadline, betsState, entryFee) {
         return `\`${String(index + 1).padStart(2, '0')}\` ${label}`;
       })
       .join('\n')
-    : '_No riders yet — invite some friends!_';
+    : '_No riders yet - invite some friends!_';
 
-  const countdown = `_Race starts in ${secondsLeft}s. Up to seven other players may join._`;
-  const feeLine = entryFee > 0
-    ? `_Entry fee: ${formatNumber(entryFee)} coins per rider._`
-    : '_Entry fee: Free to enter._';
-  const betting = renderBettingSummary(horses, betsState.betTotals, betsState.totalPool, betsState.oddsMap);
-
-  const feeBlock = feeLine ? `\n${feeLine}` : '';
-  return `${header}\n\n${description}\n\n${countdown}${feeBlock}\n\n${betting}`;
+  return {
+    description,
+    countdown: `Race starts in ${secondsLeft}s. Entry fee: ${ENTRY_COST} rupee.`,
+    betting: renderBettingSummary(horses, betTotals, totalBets),
+  };
 }
 
 function buildComponents(stage, participantCount, joinButtonId, betButtonId) {
   const joinDisabled = stage !== 'waiting' || participantCount >= MAX_PLAYERS;
-  const betDisabled = stage === 'finished';
+  const betDisabled = stage !== 'waiting';
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -203,15 +173,14 @@ module.exports = {
 
   async execute(interaction) {
     if (!interaction.inGuild()) {
-      await interaction.reply({ content: 'Horse races can only be started inside a server.', ephemeral: true });
+      const embed = makeEmbed(interaction.guildId)
+        .setTitle('Horse races need a server')
+        .setDescription('Horse races can only be started inside a server channel.');
+      await interaction.reply({ embeds: [embed], ephemeral: true });
       return;
     }
 
     const guildId = interaction.guildId;
-    const entryFee = getRaceEntryFee();
-    const raceRewards = getRaceRewards();
-    const rewardValues = [raceRewards.first, raceRewards.second, raceRewards.third];
-
     const raceId = `${interaction.id}-${Date.now()}`;
     const joinButtonId = `horserace-join-${raceId}`;
     const betButtonId = `horserace-bet-${raceId}`;
@@ -220,15 +189,7 @@ module.exports = {
     const horses = [];
     const finishOrder = [];
     const bets = new Map();
-    const entryPayments = new Map();
-
-    async function chargeEntry(userId) {
-      if (entryFee <= 0) return true;
-      if (entryPayments.has(userId)) return true;
-      const paid = await coinStore.spendCoins(guildId, userId, entryFee);
-      if (paid) entryPayments.set(userId, entryFee);
-      return paid;
-    }
+    const entryPayments = new Set();
 
     function registerParticipant(user) {
       if (participants.has(user.id)) {
@@ -265,14 +226,19 @@ module.exports = {
       }
     }
 
-    if (!(await chargeEntry(interaction.user.id))) {
-      const costText = formatNumber(entryFee);
-      await interaction.reply({
-        content: `You need ${costText} coins to enter a horse race.`,
-        ephemeral: true,
-      });
+    const paid = await rupeeStore.spendTokens(guildId, interaction.user.id, ENTRY_COST);
+    if (!paid) {
+      const balance = rupeeStore.getBalance(guildId, interaction.user.id);
+      const embed = makeEmbed(guildId)
+        .setTitle('Not enough Rupees')
+        .setDescription(
+          `You need ${ENTRY_COST} rupee${ENTRY_COST === 1 ? '' : 's'} to start a horse race.\n` +
+          `Current balance: ${balance}.`
+        );
+      await interaction.reply({ embeds: [embed], ephemeral: true });
       return;
     }
+    entryPayments.add(interaction.user.id);
 
     registerParticipant({
       id: interaction.user.id,
@@ -284,32 +250,43 @@ module.exports = {
     const joinDeadline = Date.now() + JOIN_WINDOW_MS;
     let stage = 'waiting';
     let currentTick = 0;
-    let finalSummary = '';
+    let finalSummaryEmbed = null;
 
     await interaction.deferReply();
 
     const buildAndSend = async () => {
       try {
-        const betsState = calculateBettingState(horses, bets);
-        let content;
+        const { betTotals, totalBets } = summarizeBets(horses, bets);
+        let embed;
         if (stage === 'waiting') {
-          content = renderWaitingState(horses, joinDeadline, betsState, entryFee);
+          const waiting = renderWaitingState(horses, joinDeadline, betTotals, totalBets);
+          embed = makeEmbed(guildId)
+            .setTitle('🏇 Horse Race Lobby')
+            .setDescription(waiting.description)
+            .addFields(
+              { name: 'Start timer', value: waiting.countdown, inline: false },
+              { name: 'Bets', value: waiting.betting, inline: false },
+            )
+            .setFooter({ text: `Entry cost: ${ENTRY_COST} rupee • Bets cost: ${BET_COST} rupee each` });
         } else {
-          const raceBody = renderRace(horses, finishOrder, {
-            finished: stage === 'finished',
-            tick: currentTick,
-            oddsMap: betsState.oddsMap,
-          });
-          if (stage === 'finished' && finalSummary) {
-            content = `${raceBody}\n\n${finalSummary}`;
-          } else {
-            const betSummary = renderBettingSummary(horses, betsState.betTotals, betsState.totalPool, betsState.oddsMap);
-            content = `${raceBody}\n\n${betSummary}`;
+          const raceLines = renderRaceLines(horses, finishOrder, betTotals);
+          const title = stage === 'finished'
+            ? '🏁 Horse Race — Final Standings'
+            : `🏇 Horse Race — Turn ${currentTick}`;
+          embed = makeEmbed(guildId)
+            .setTitle(title)
+            .setDescription(raceLines.join('\n'));
+
+          if (stage !== 'finished') {
+            embed.addFields({ name: 'Bets', value: renderBettingSummary(horses, betTotals, totalBets) });
+            embed.setFooter({ text: 'Live updates every 3 seconds' });
+          } else if (finalSummaryEmbed) {
+            embed = finalSummaryEmbed;
           }
         }
 
         await interaction.editReply({
-          content,
+          embeds: [embed],
           components: buildComponents(stage, horses.length, joinButtonId, betButtonId),
           allowedMentions: { parse: [] },
         });
@@ -333,41 +310,48 @@ module.exports = {
     collector.on('collect', async (componentInteraction) => {
       if (componentInteraction.customId === joinButtonId) {
         if (stage !== 'waiting') {
-          await componentInteraction.reply({ content: 'The race has already started!', ephemeral: true });
+          const embed = makeEmbed(guildId).setTitle('Race already started').setDescription('The race has already started!');
+          await componentInteraction.reply({ embeds: [embed], ephemeral: true });
           return;
         }
         if (horses.length >= MAX_PLAYERS) {
-          await componentInteraction.reply({ content: 'The roster is full!', ephemeral: true });
+          const embed = makeEmbed(guildId).setTitle('Roster full').setDescription('The roster is full!');
+          await componentInteraction.reply({ embeds: [embed], ephemeral: true });
           return;
         }
         if (participants.has(componentInteraction.user.id)) {
-          await componentInteraction.reply({ content: 'You are already entered in this race.', ephemeral: true });
+          const embed = makeEmbed(guildId).setTitle('Already entered').setDescription('You are already entered in this race.');
+          await componentInteraction.reply({ embeds: [embed], ephemeral: true });
           return;
         }
-        if (!(await chargeEntry(componentInteraction.user.id))) {
-          const balance = coinStore.getBalance(guildId, componentInteraction.user.id);
-          const costText = formatNumber(entryFee);
-          const balanceText = formatNumber(balance);
-          await componentInteraction.reply({
-            content: `Joining a race costs ${costText} coins. Your balance is ${balanceText} coins.`,
-            ephemeral: true,
-          });
+        if (!(await rupeeStore.spendTokens(guildId, componentInteraction.user.id, ENTRY_COST))) {
+          const balance = rupeeStore.getBalance(guildId, componentInteraction.user.id);
+          const embed = makeEmbed(guildId)
+            .setTitle('Not enough Rupees')
+            .setDescription(
+              `Joining a race costs ${ENTRY_COST} rupee. You have ${balance}.\nEarn more and try again!`
+            );
+          await componentInteraction.reply({ embeds: [embed], ephemeral: true });
           return;
         }
+        entryPayments.add(componentInteraction.user.id);
         registerParticipant({
           id: componentInteraction.user.id,
           username: componentInteraction.user.username,
           displayName: componentInteraction.member?.displayName,
           globalName: componentInteraction.user.globalName,
         });
-        const joinMessage = entryFee > 0
-          ? `You have joined the race! 🐎 (-${formatNumber(entryFee)} coins)`
-          : 'You have joined the race! 🐎';
-        await componentInteraction.reply({ content: joinMessage, ephemeral: true });
+        const joinEmbed = makeEmbed(guildId)
+          .setTitle('You joined the race!')
+          .setDescription(`A rupee has been deducted. Good luck, ${componentInteraction.user.displayName || componentInteraction.user.username}!`);
+        await componentInteraction.reply({ embeds: [joinEmbed], ephemeral: true });
         await buildAndSend();
       } else if (componentInteraction.customId === betButtonId) {
         if (stage === 'finished') {
-          await componentInteraction.reply({ content: 'Betting has closed. The race is over!', ephemeral: true });
+          const embed = makeEmbed(guildId)
+            .setTitle('Betting closed')
+            .setDescription('The race is already over.');
+          await componentInteraction.reply({ embeds: [embed], ephemeral: true });
           return;
         }
 
@@ -384,14 +368,6 @@ module.exports = {
                 .setRequired(true)
                 .setStyle(TextInputStyle.Short),
             ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId('betAmount')
-                .setLabel('Bet amount (coins)')
-                .setPlaceholder('Enter a positive number')
-                .setRequired(true)
-                .setStyle(TextInputStyle.Short),
-            ),
           );
 
         try {
@@ -402,54 +378,42 @@ module.exports = {
           });
 
           const horseNumberRaw = submission.fields.getTextInputValue('horseNumber');
-          const betAmountRaw = submission.fields.getTextInputValue('betAmount');
           const horseNumber = Number.parseInt(horseNumberRaw, 10);
-          const betAmount = Number.parseFloat(betAmountRaw);
 
           if (!Number.isInteger(horseNumber) || horseNumber < 1 || horseNumber > horses.length) {
-            await submission.reply({ content: `Please enter a valid horse number between 1 and ${horses.length}.`, ephemeral: true });
-            return;
-          }
-          if (!Number.isFinite(betAmount) || betAmount <= 0) {
-            await submission.reply({ content: 'Bet amount must be a positive number.', ephemeral: true });
-            return;
-          }
-          if (betAmount > 1_000_000) {
-            await submission.reply({ content: 'That bet is a little too spicy — keep it under 1,000,000 coins.', ephemeral: true });
+            const embed = makeEmbed(guildId)
+              .setTitle('Invalid horse number')
+              .setDescription(`Please enter a valid horse number between 1 and ${horses.length}.`);
+            await submission.reply({ embeds: [embed], ephemeral: true });
             return;
           }
 
           const targetHorse = horses[horseNumber - 1];
           const existing = bets.get(submission.user.id);
-          const previousAmount = existing ? Number(existing.amount) || 0 : 0;
-          const delta = betAmount - previousAmount;
-
-          if (delta > 0) {
-            const paid = await coinStore.spendCoins(guildId, submission.user.id, delta);
+          if (!existing) {
+            const paid = await rupeeStore.spendTokens(guildId, submission.user.id, BET_COST);
             if (!paid) {
-              const balance = coinStore.getBalance(guildId, submission.user.id);
-              await submission.reply({
-                content: `That wager requires ${formatNumber(delta)} coins. Your balance is ${formatNumber(balance)} coins.`,
-                ephemeral: true,
-              });
+              const balance = rupeeStore.getBalance(guildId, submission.user.id);
+              const embed = makeEmbed(guildId)
+                .setTitle('Not enough Rupees')
+                .setDescription(
+                  `Placing a bet costs ${BET_COST} rupee. Your balance is ${balance}.\n` +
+                  'Earn another rupee and try again.'
+                );
+              await submission.reply({ embeds: [embed], ephemeral: true });
               return;
             }
-          } else if (delta < 0) {
-            await coinStore.addCoins(guildId, submission.user.id, -delta);
           }
 
-          bets.set(submission.user.id, { horseId: targetHorse.id, amount: betAmount });
+          bets.set(submission.user.id, { horseId: targetHorse.id });
 
-          const deltaMessage = delta > 0
-            ? ` (-${formatNumber(delta)} coins)`
-            : delta < 0
-              ? ` (+${formatNumber(-delta)} coins refunded)`
-              : '';
-
-          await submission.reply({
-            content: `Bet placed on **${escapeMarkdown(targetHorse.shortName || targetHorse.name)}** for ${formatNumber(betAmount)} coins.${deltaMessage}`,
-            ephemeral: true,
-          });
+          const embed = makeEmbed(guildId)
+            .setTitle('Bet placed')
+            .setDescription(
+              `You placed 1 rupee on **${escapeMarkdown(targetHorse.shortName || targetHorse.name)}**.\n` +
+              'If they win, you gain +1 rupee profit and get your bet back.'
+            );
+          await submission.reply({ embeds: [embed], ephemeral: true });
           await buildAndSend();
         } catch (err) {
           if (err?.code === 'INTERACTION_COLLECTOR_ERROR') return;
@@ -484,6 +448,21 @@ module.exports = {
 
     await buildAndSend();
 
+    const sendLiveUpdate = async () => {
+      try {
+        const { betTotals, totalBets } = summarizeBets(horses, bets);
+        const raceLines = renderRaceLines(horses, finishOrder, betTotals);
+        const embed = makeEmbed(guildId)
+          .setTitle(`🏇 Horse Race — Turn ${currentTick}`)
+          .setDescription(raceLines.join('\n'))
+          .addFields({ name: 'Bets', value: renderBettingSummary(horses, betTotals, totalBets) })
+          .setFooter({ text: 'Live updates every 3 seconds' });
+        await interaction.followUp({ embeds: [embed], allowedMentions: { parse: [] } });
+      } catch (err) {
+        console.error('Failed to send live race update:', err);
+      }
+    };
+
     for (let tick = 1; tick <= MAX_TICKS; tick += 1) {
       currentTick = tick;
       let anyProgress = false;
@@ -500,7 +479,7 @@ module.exports = {
         if (advance > 0) anyProgress = true;
       }
 
-      await buildAndSend();
+      await sendLiveUpdate();
       if (finishOrder.length === horses.length) {
         break;
       }
@@ -526,22 +505,18 @@ module.exports = {
 
     stage = 'finished';
 
-    const betsState = calculateBettingState(horses, bets);
     const winningHorse = finishOrder[0];
-    const winningOdds = betsState.oddsMap.get(winningHorse.id) || 1.1;
     const winners = [];
     const losers = [];
 
     for (const [userId, bet] of bets.entries()) {
       if (!bet) continue;
-      const amount = Number(bet.amount);
-      if (!Number.isFinite(amount) || amount <= 0) continue;
-      const payout = bet.horseId === winningHorse.id ? amount * winningOdds : 0;
-      if (payout > 0) {
-        await coinStore.addCoins(guildId, userId, payout);
-        winners.push(`• <@${userId}> won ${formatNumber(payout, 2)} coins (bet ${formatNumber(amount)}).`);
+      const isWinner = bet.horseId === winningHorse.id;
+      if (isWinner) {
+        await rupeeStore.addTokens(guildId, userId, 2); // 1 profit + 1 refunded
+        winners.push(`• <@${userId}> won and earned +1 rupee (bet refunded).`);
       } else {
-        losers.push(`• <@${userId}> lost ${formatNumber(amount)} coins.`);
+        losers.push(`• <@${userId}> lost their 1 rupee bet.`);
       }
     }
 
@@ -556,11 +531,11 @@ module.exports = {
       const placementLabel = placementNumber
         ? PLACE_EMOJIS[placementIndex] ?? `#${placementNumber}`
         : '#?';
-      const reward = placementNumber ? rewardValues[placementIndex] || 0 : 0;
+      const reward = placementNumber ? PLACEMENT_REWARDS[placementIndex] || 0 : 0;
       if (reward > 0) {
-        await coinStore.addCoins(guildId, horse.userId, reward);
+        await rupeeStore.addTokens(guildId, horse.userId, reward);
       }
-      const rewardText = reward > 0 ? ` (+${formatNumber(reward)} coins)` : '';
+      const rewardText = reward > 0 ? ` (+${reward} rupee${reward === 1 ? '' : 's'})` : '';
       playerSummaryLines.push(
         `• **${escapeMarkdown(horse.shortName || horse.name)}** ${placementLabel}${rewardText} — 🥇 ${stats.first ?? 0} · 🥈 ${stats.second ?? 0} · 🥉 ${stats.third ?? 0} (Races: ${stats.races ?? 0})`,
       );
@@ -572,59 +547,41 @@ module.exports = {
 
     const summarySections = [];
     if (podium) {
-      summarySections.push('**Podium:**', podium);
+      summarySections.push({ name: 'Podium', value: podium, inline: false });
     }
     if (playerSummaryLines.length) {
-      summarySections.push('**Player stats:**', ...playerSummaryLines);
+      summarySections.push({ name: 'Player stats', value: playerSummaryLines.join('\n'), inline: false });
     }
 
-    if (entryFee > 0) {
-      summarySections.push(`_Entry fee: ${formatNumber(entryFee)} coins per rider._`);
-    }
+    summarySections.push({ name: 'Entry fee', value: `${ENTRY_COST} rupee per rider`, inline: true });
+    summarySections.push({
+      name: 'Winning horse',
+      value: escapeMarkdown(winningHorse.shortName || winningHorse.name),
+      inline: true,
+    });
 
-    summarySections.push(`**Winning horse:** ${escapeMarkdown(winningHorse.shortName || winningHorse.name)} (odds ${formatNumber(winningOdds, 2)}x)`);
-
-    if (betsState.totalPool > 0) {
-      summarySections.push(`**Betting results — total pot ${formatNumber(betsState.totalPool)} coins:**`);
-      if (winners.length) {
-        summarySections.push(...winners);
-      } else {
-        summarySections.push('_No winning bets this time._');
-      }
+    if (bets.size > 0) {
+      summarySections.push({
+        name: 'Betting results',
+        value: winners.length
+          ? winners.join('\n')
+          : '_No winning bets this time._',
+        inline: false,
+      });
       if (losers.length) {
-        summarySections.push(...losers);
+        summarySections.push({ name: 'Lost bets', value: losers.join('\n'), inline: false });
       }
     } else {
-      summarySections.push('_No bets were placed during this race._');
+      summarySections.push({ name: 'Betting results', value: '_No bets were placed during this race._', inline: false });
     }
 
-    finalSummary = summarySections.join('\n');
+    finalSummaryEmbed = makeEmbed(guildId)
+      .setTitle('🏁 Horse Race — Results')
+      .setDescription('Race complete! Here are the results:')
+      .addFields(summarySections);
 
+    await interaction.followUp({ embeds: [finalSummaryEmbed], allowedMentions: { parse: [] } });
     await buildAndSend();
-
-    try {
-      const matchRankLines = finishOrder.map((horse, idx) => {
-        const place = idx + 1;
-        const medal = PLACE_EMOJIS[idx] ?? `#${place}`;
-        const nameRaw = horse.shortName || horse.name || `Horse ${place}`;
-        const name = horse.isPlayer ? `**${escapeMarkdown(nameRaw)}**` : escapeMarkdown(nameRaw);
-        if (!horse.isPlayer || !horse.userId) {
-          return `${medal} ${name} — NPC`;
-        }
-        const stats = playerStatsByUserId.get(horse.userId);
-        const recordText = stats
-          ? `🥇 ${stats.first ?? 0} | 🥈 ${stats.second ?? 0} | 🥉 ${stats.third ?? 0} (Races: ${stats.races ?? 0})`
-          : 'No record yet';
-        return `${medal} ${name} — ${recordText}`;
-      });
-
-      await interaction.followUp({
-        content: `**🏁 Match ranks & records**\n${matchRankLines.map(line => `• ${line}`).join('\n')}`,
-        allowedMentions: { parse: [] },
-      });
-    } catch (err) {
-      console.error('Failed to send horserace ranks/records message:', err);
-    }
     collector.stop('finished');
   },
 };
