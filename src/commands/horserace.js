@@ -17,7 +17,7 @@ const TRACK_SLOTS = 80;
 const TICK_DELAY_MS = 3_000;
 const MAX_TICKS = 10;
 const JOIN_WINDOW_MS = 60_000;
-const MIN_PLAYERS = 1;
+const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
 const ENTRY_COST = 1;
 const BET_COST = 1;
@@ -109,7 +109,7 @@ function renderWaitingState(horses, joinDeadline, betTotals, totalBets) {
 
   return {
     description,
-    countdown: `Race starts in ${secondsLeft}s. Entry fee: ${ENTRY_COST} rupee.`,
+    countdown: `Race starts in ${secondsLeft}s (need ${MIN_PLAYERS}+ racers). Entry fee: ${ENTRY_COST} rupee.`,
     betting: renderBettingSummary(horses, betTotals, totalBets),
   };
 }
@@ -221,6 +221,16 @@ module.exports = {
               { name: 'Bets', value: waiting.betting, inline: false },
             )
             .setFooter({ text: `Entry cost: ${ENTRY_COST} rupee • Bets cost: ${BET_COST} rupee each` });
+        } else if (stage === 'cancelled') {
+          const refunds = [];
+          if (entryPayments.size > 0) refunds.push('entry fees');
+          if (bets.size > 0) refunds.push('bets');
+          const refundNote = refunds.length ? `Refunded ${refunds.join(' and ')}.` : '';
+          embed = makeEmbed(guildId)
+            .setTitle('🏇 Horse Race Cancelled')
+            .setDescription(
+              `Not enough racers joined in time (need at least ${MIN_PLAYERS}).\n${refundNote || 'No charges were made.'}`
+            );
         } else {
           const raceLines = renderRaceLines(horses, finishOrder, betTotals);
           const title = stage === 'finished'
@@ -387,6 +397,23 @@ module.exports = {
     };
 
     await waitForJoinPhase();
+
+    if (horses.length < MIN_PLAYERS) {
+      stage = 'cancelled';
+
+      for (const userId of entryPayments) {
+        await rupeeStore.addTokens(guildId, userId, ENTRY_COST);
+      }
+      for (const [userId, bet] of bets.entries()) {
+        if (!bet) continue;
+        await rupeeStore.addTokens(guildId, userId, BET_COST);
+      }
+
+      await buildAndSend();
+      collector.stop('not_enough_players');
+      return;
+    }
+
     stage = 'running';
 
     await buildAndSend();
