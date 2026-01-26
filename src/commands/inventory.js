@@ -1,6 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const coinStore = require('../utils/coinStore');
 const rupeeStore = require('../utils/rupeeStore');
+const tokenStore = require('../utils/messageTokenStore');
+const smiteConfigStore = require('../utils/smiteConfigStore');
 const { resolveEmbedColour } = require('../utils/guildColourStore');
 const { getRupeeCost } = require('../utils/economyConfig');
 
@@ -40,7 +42,7 @@ function buildInventoryEmbed({
     .setColor(resolveEmbedColour(guildId, 0xf1c40f))
     .setTitle(title)
     .setDescription(
-      'Your sacred belongings, tallied and catalogued. Spend coins to expand your arsenal.'
+      'Your sacred belongings, tallied and catalogued. Spend coins in /store to expand your arsenal.'
     )
     .addFields(
       {
@@ -49,17 +51,17 @@ function buildInventoryEmbed({
           coinSummary.lifetimeEarned
         )} | Spent ${formatCoins(
           coinSummary.lifetimeSpent
-        )}\nCoins are the base currency for other features and upgrades.`,
+        )}\nCoins are the divine currency for other features and upgrades.`,
+      },
+      {
+        name: '⚡ Smites',
+        value: `**Owned:** ${tokenStore.getBalance(guildId, user?.id)}\n**Cost:** 200 coins each\nSmite rewards are currently **${smiteConfigStore.isEnabled(guildId) ? 'enabled' : 'disabled'}**.`,
       },
       {
         name: '💎 Rupees',
         value: `**Owned:** ${rupeeBalance}\n**Cost:** ${formatCoins(
           rupeeCost
         )} coins each\nRupees unlock the powerful /analysis command, can be bestowed by moderators using /giverupee, and are spent in /rupeestore.`,
-      },
-      {
-        name: '🏪 Rupee Shop',
-        value: 'Visit `/rupeestore` to buy items like **STFU** (5 rupees) to silence a user or **Abuse Mod** (10 rupees) to timeout a moderator for 5 minutes.',
       }
     );
 
@@ -67,7 +69,12 @@ function buildInventoryEmbed({
     name: '🙏 Blessing',
     value: prayStatus.canPray
       ? 'Ready! Use /blessing to receive 1 rupee.'
-      : `Already blessed. You can bless again in ${formatDuration(prayStatus.cooldownMs)}.`,
+      : `Already blessed. You can pray again in ${formatDuration(prayStatus.cooldownMs)}.`,
+  });
+
+  embed.addFields({
+    name: '🏪 Rupee Shop',
+    value: 'Visit `/rupeestore` to buy **Nickname Change** (10), **Custom Role — Solid** (5), **Custom Role — Gradient** (15), **STFU** (5), **Abuse Mod** (10).',
   });
 
   const avatarUrl = typeof user.displayAvatarURL === 'function' ? user.displayAvatarURL({ forceStatic: true }) : null;
