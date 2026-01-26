@@ -1,24 +1,14 @@
-const { Events, AuditLogEvent, PermissionsBitField } = require('discord.js');
+const { Events, AuditLogEvent, PermissionsBitField, EmbedBuilder } = require('discord.js');
 const logSender = require('../utils/logSender');
-const { buildLogEmbed } = require('../utils/logEmbedFactory');
 const userMessageLogStore = require('../utils/userMessageLogStore');
+
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.apng', '.heic', '.gif'];
+const RED = 0xed4245;
 
 function truncate(str, max = 1024) {
   if (!str) return '';
   const value = String(str);
   return value.length > max ? `${value.slice(0, max - 3)}...` : value;
-}
-
-function summarizeAttachments(message) {
-  if (!message?.attachments?.size) return '';
-  const names = [];
-  for (const att of message.attachments.values()) {
-    if (!att) continue;
-    if (att.name) names.push(att.name);
-    else if (att.id) names.push(`attachment-${att.id}`);
-    if (names.length >= 5) break;
-  }
-  return names.length ? names.join(', ') : '';
 }
 
 function getCachedContent(message) {
@@ -34,6 +24,72 @@ function getCachedContent(message) {
     return { content: nearest.content, source: 'cached_channel' };
   }
   return null;
+}
+
+function formatUser(user) {
+  if (!user) return 'Unknown user';
+  const tag = user.tag || user.username || user.globalName || 'Unknown';
+  return `${tag} (${user.id || 'unknown'})`;
+}
+
+function formatDateTime(date) {
+  const safeDate = date instanceof Date ? date : new Date(date || Date.now());
+  try {
+    return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(safeDate);
+  } catch (_) {
+    return safeDate.toISOString();
+  }
+}
+
+function isImageAttachment(att) {
+  if (!att) return false;
+  const contentType = (att.contentType || '').toLowerCase();
+  if (contentType.startsWith('image/')) return true;
+  const name = (att.name || att.url || '').toLowerCase();
+  return IMAGE_EXTS.some(ext => name.endsWith(ext));
+}
+
+function collectAttachmentInfo(message) {
+  const lines = [];
+  const files = [];
+  const attachments = Array.from(message?.attachments?.values?.() || []);
+  for (const att of attachments) {
+    if (!att) continue;
+    const label = truncate(att.name || 'attachment', 80);
+    if (att.url) lines.push(`[${label}](${att.url})`);
+    else lines.push(label);
+    if (isImageAttachment(att) && att.url) {
+      files.push({ attachment: att.url, name: att.name || `attachment-${att.id || files.length + 1}.png` });
+    }
+    if (lines.length >= 10) break;
+  }
+  return { lines, files };
+}
+
+function buildDeletedEmbed({ message, content, executor, attachmentInfo, contentSource, deletedAt }) {
+  const embed = new EmbedBuilder()
+    .setTitle('Message Deleted')
+    .setColor(RED)
+    .setTimestamp(deletedAt)
+    .addFields(
+      { name: 'User', value: formatUser(message.author || 'Unknown'), inline: false },
+      { name: 'Deleted By', value: formatUser(executor || 'Unknown'), inline: false },
+      { name: 'Channel', value: `<#${message.channel.id}> (${message.channel.id})`, inline: true },
+      { name: 'Message ID', value: message.id || 'Unknown', inline: true },
+      { name: 'Content', value: content, inline: false },
+      { name: 'Attachments', value: attachmentInfo.lines.length ? attachmentInfo.lines.join('\n').slice(0, 1024) : 'None', inline: false },
+    )
+    .setFooter({ text: `Deleted at ${formatDateTime(deletedAt)}` });
+
+  if (contentSource && contentSource !== 'live') {
+    embed.addFields({ name: 'Content Source', value: contentSource, inline: true });
+  }
+
+  const thumbTarget = executor || message.author;
+  const avatarUrl = thumbTarget?.displayAvatarURL?.({ extension: 'png', size: 256 });
+  if (avatarUrl) embed.setThumbnail(avatarUrl);
+
+  return embed;
 }
 
 module.exports = {
@@ -65,24 +121,14 @@ module.exports = {
       }
       if (!content) content = '*No content available*';
 
-      const attachmentSummary = summarizeAttachments(message);
-      const notes = [];
-      if (message.partial) notes.push('Message was partial when deleted');
-      if (contentSource && contentSource !== 'live') notes.push(`Content from ${contentSource}`);
-      if (!notes.length && attachmentSummary) notes.push('Attachments were present');
-      const embed = buildLogEmbed({
-        action: 'Message Deleted',
-        target: message.author || 'Unknown',
-        actor: executor || 'System',
-        reason: content,
-        color: 0xed4245,
-        extraFields: [
-          { name: 'Channel', value: `<#${message.channel.id}> (${message.channel.id})`, inline: true },
-          { name: 'Message ID', value: message.id || 'Unknown', inline: true },
-          { name: 'Deleted by', value: executor ? `${executor.tag} (${executor.id})` : 'Unknown', inline: false },
-          ...(attachmentSummary ? [{ name: 'Attachments', value: truncate(attachmentSummary, 256), inline: true }] : []),
-          ...(notes.length ? [{ name: 'Notes', value: notes.join('\n'), inline: false }] : []),
-        ],
+      const attachmentInfo = collectAttachmentInfo(message);
+      const embed = buildDeletedEmbed({
+        message,
+        content,
+        executor,
+        attachmentInfo,
+        contentSource,
+        deletedAt: new Date(),
       });
       await logSender.sendLog({
         guildId: guild.id,
@@ -90,6 +136,7 @@ module.exports = {
         embed,
         client: message.client,
         ownerFallback: true,
+        files: attachmentInfo.files,
       });
     } catch (err) {
       console.error('messageDelete handler error:', err);

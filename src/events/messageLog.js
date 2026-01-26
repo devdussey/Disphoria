@@ -1,4 +1,4 @@
-const { Events } = require('discord.js');
+const { Events, EmbedBuilder } = require('discord.js');
 const logSender = require('../utils/logSender');
 const { buildLogEmbed } = require('../utils/logEmbedFactory');
 
@@ -6,6 +6,7 @@ const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.apng', 
 const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi'];
 const AUDIO_EXTS = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.opus'];
 const GIF_EXTS = ['.gif', '.gifv'];
+const BRIGHT_GREEN = 0x00ff73;
 
 function lowercase(str) {
   return typeof str === 'string' ? str.toLowerCase() : '';
@@ -126,6 +127,69 @@ function formatMediaDetails(mediaItems, stickerItems) {
   return lines.join('\n').slice(0, 1024) || 'Media details unavailable.';
 }
 
+function formatUser(user) {
+  if (!user) return 'Unknown user';
+  const tag = user.tag || user.username || user.globalName || 'Unknown';
+  return `${tag} (${user.id || 'unknown'})`;
+}
+
+function formatDateTime(date) {
+  const safeDate = date instanceof Date ? date : new Date(date || Date.now());
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(safeDate);
+  } catch (_) {
+    return safeDate.toISOString();
+  }
+}
+
+function buildAttachmentInfo(message) {
+  const lines = [];
+  const files = [];
+  const attachments = Array.from(message.attachments?.values?.() || []);
+
+  for (const att of attachments) {
+    if (!att) continue;
+    const classified = classifyAttachment(att);
+    const name = truncate(att.name || classified?.name || 'attachment', 80);
+    if (att.url) {
+      lines.push(`[${name}](${att.url})`);
+    } else {
+      lines.push(name);
+    }
+    if (classified && (classified.type === 'image' || classified.type === 'gif') && att.url) {
+      files.push({ attachment: att.url, name: att.name || `attachment-${att.id || files.length + 1}.png` });
+    }
+    if (lines.length >= 10) break;
+  }
+
+  return { lines, files };
+}
+
+function buildCreatedEmbed(message, attachmentInfo) {
+  const createdAt = message.createdAt || new Date(message.createdTimestamp || Date.now());
+  const content = truncate(message.content || '*No content*', 1024) || '*No content*';
+  const embed = new EmbedBuilder()
+    .setTitle('Message Created')
+    .setColor(BRIGHT_GREEN)
+    .setTimestamp(createdAt)
+    .addFields(
+      { name: 'User', value: formatUser(message.author), inline: false },
+      { name: 'Channel', value: `<#${message.channel.id}> (${message.channel.id})`, inline: true },
+      { name: 'Message ID', value: message.id, inline: true },
+      { name: 'Content', value: content, inline: false },
+      { name: 'Attachments', value: attachmentInfo.lines.length ? attachmentInfo.lines.join('\n').slice(0, 1024) : 'None', inline: false },
+    )
+    .setFooter({ text: `Created at ${formatDateTime(createdAt)}` });
+
+  const avatarUrl = message.author?.displayAvatarURL?.({ extension: 'png', size: 256 });
+  if (avatarUrl) embed.setThumbnail(avatarUrl);
+
+  return embed;
+}
+
 function buildMediaEmbed(message, mediaItems, stickerItems) {
   const summary = formatMediaSummary(mediaItems, stickerItems);
   const caption = truncate((message.content || '').trim(), 800);
@@ -154,33 +218,16 @@ module.exports = {
   async execute(message) {
     try {
       if (!message.guild || message.author?.bot) return;
-      const content = message.content?.substring(0, 1000) || '*No content*';
       const { mediaItems, stickerItems } = collectMediaFromMessage(message);
-
-      const embed = buildLogEmbed({
-        action: 'Message Created',
-        target: message.author,
-        actor: message.author,
-        reason: content,
-        color: 0x2ecc71,
-        extraFields: [
-          { name: 'Channel', value: `<#${message.channel.id}> (${message.channel.id})`, inline: true },
-          { name: 'Message ID', value: message.id, inline: true },
-          { name: 'Attachments', value: message.attachments.size > 0 ? `${message.attachments.size} file(s)` : 'None', inline: true },
-        ],
-      });
-
-      // Attach the first image/gif to the embed for quick viewing.
-      const firstImage = mediaItems.find(item => item.type === 'image' || item.type === 'gif');
-      if (firstImage?.url) {
-        embed.setImage(firstImage.url);
-      }
+      const attachmentInfo = buildAttachmentInfo(message);
+      const embed = buildCreatedEmbed(message, attachmentInfo);
 
       await logSender.sendLog({
         guildId: message.guild.id,
         logType: 'message_create',
         embed,
         client: message.client,
+        files: attachmentInfo.files,
       });
 
       if (mediaItems.length || stickerItems.length) {

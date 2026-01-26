@@ -73,10 +73,11 @@ async function findReusableForumThread(channel, threadName) {
   return null;
 }
 
-async function sendToForumChannel(channel, logKey, embeds) {
+async function sendToForumChannel(channel, logKey, embeds, files) {
   const cacheKey = `${channel.id}:${logKey || 'logs'}`;
   const threadName = buildForumThreadName(logKey);
   const embedsArray = Array.isArray(embeds) ? embeds : [embeds];
+  const payload = files?.length ? { embeds: embedsArray, files } : { embeds: embedsArray };
 
   try {
     const cached = await fetchCachedForumThread(channel, cacheKey);
@@ -84,7 +85,7 @@ async function sendToForumChannel(channel, logKey, embeds) {
 
     if (thread) {
       try {
-        await thread.send({ embeds: embedsArray });
+        await thread.send(payload);
         forumThreadCache.set(cacheKey, thread.id);
         return true;
       } catch (err) {
@@ -98,7 +99,7 @@ async function sendToForumChannel(channel, logKey, embeds) {
       name: threadName,
       autoArchiveDuration: resolveForumArchiveDuration(channel),
       reason: `Log thread for ${logKey}`,
-      message: { embeds: embedsArray },
+      message: payload,
     });
     forumThreadCache.set(cacheKey, created.id);
     return true;
@@ -117,6 +118,7 @@ async function sendToForumChannel(channel, logKey, embeds) {
  * @param {Object} options.embed - Discord embed or array of embeds to send
  * @param {Object} options.client - Discord client (for owner DM fallback)
  * @param {boolean} options.ownerFallback - Whether to DM owners if channel fails (default: false)
+ * @param {Array} [options.files] - Optional attachments to include with the log message
  * @returns {Promise<boolean>} - True if successfully sent to at least one destination
  */
 async function sendLog(options) {
@@ -126,6 +128,7 @@ async function sendLog(options) {
     embed,
     client,
     ownerFallback = false,
+    files = null,
   } = options;
 
   if (!guildId || !logType || !embed) {
@@ -134,6 +137,7 @@ async function sendLog(options) {
   }
 
   const embedsArray = Array.isArray(embed) ? embed : [embed];
+  const filesArray = Array.isArray(files) && files.length ? files : null;
   const fallbackKey = getFallbackKey(logType);
   let sentSuccessfully = false;
   let resolvedLogKey = logType;
@@ -186,11 +190,12 @@ async function sendLog(options) {
 
           if (allowed) {
             try {
+              const payload = filesArray ? { embeds: embedsArray, files: filesArray } : { embeds: embedsArray };
               if (channel.type === ChannelType.GuildForum) {
-                const sent = await sendToForumChannel(channel, resolvedLogKey, embedsArray);
+                const sent = await sendToForumChannel(channel, resolvedLogKey, embedsArray, filesArray || undefined);
                 sentSuccessfully = sentSuccessfully || sent;
               } else {
-                await channel.send({ embeds: embedsArray });
+                await channel.send(payload);
                 sentSuccessfully = true;
               }
             } catch (err) {
@@ -212,10 +217,12 @@ async function sendLog(options) {
       for (const ownerId of owners) {
         try {
           const user = await client.users.fetch(ownerId);
-          await user.send({
+          const dmPayload = {
             content: `[${logType.toUpperCase()} LOG - Guild: ${guildId}]`,
             embeds: embedsArray,
-          });
+          };
+          if (filesArray) dmPayload.files = filesArray;
+          await user.send(dmPayload);
           sentSuccessfully = true;
         } catch (err) {
           console.error(`Failed to notify owner ${ownerId}:`, err.message);
@@ -246,13 +253,14 @@ async function sendLogs(options) {
   let successful = 0;
   let failed = 0;
 
-  for (const { logType, embed } of logs) {
+  for (const { logType, embed, files } of logs) {
     const result = await sendLog({
       guildId,
       logType,
       embed,
       client,
       ownerFallback,
+      files,
     });
     if (result) successful++;
     else failed++;
