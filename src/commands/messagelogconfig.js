@@ -1,5 +1,7 @@
 const { SlashCommandBuilder, PermissionsBitField, ChannelType, EmbedBuilder } = require('discord.js');
 const logChannelTypeStore = require('../utils/logChannelTypeStore');
+const logSender = require('../utils/logSender');
+const { buildLogEmbed } = require('../utils/logEmbedFactory');
 
 const LOG_KEY_MAP = {
   created: 'message_create',
@@ -8,6 +10,12 @@ const LOG_KEY_MAP = {
 };
 
 const ALL_MESSAGE_KEYS = ['message', LOG_KEY_MAP.created, LOG_KEY_MAP.deleted, LOG_KEY_MAP.edited];
+const STATUS_COLORS = {
+  enable: 0x2ecc71,
+  disable: 0xed4245,
+  current: 0xffd166,
+  test: 0x3498db,
+};
 
 function formatEntry(entry) {
   const enabledText = entry?.enabled === false ? 'Disabled' : 'Enabled';
@@ -15,11 +23,38 @@ function formatEntry(entry) {
   return `${enabledText} — ${channelText}`;
 }
 
-function buildSummaryEmbed({ status, scopeLabel, channel, entries }) {
+function prettyKey(key) {
+  return key.replace(/_/g, ' ').toUpperCase();
+}
+
+function formatTestResults(results) {
+  if (!results?.length) return 'No tests were run.';
+  return results
+    .map(result => `${result.ok ? '✅' : '❌'} ${prettyKey(result.key)}${result.error ? ` — ${result.error}` : ''}`)
+    .join('\n')
+    .slice(0, 1024);
+}
+
+function buildTestEmbed({ logKey, channel, requester }) {
+  return buildLogEmbed({
+    action: 'Message Log Test',
+    target: requester || 'System',
+    actor: requester || 'System',
+    reason: `Testing routing for ${prettyKey(logKey)}.`,
+    color: STATUS_COLORS.test,
+    extraFields: [
+      { name: 'Route', value: prettyKey(logKey), inline: true },
+      { name: 'Channel', value: channel ? `<#${channel.id}> (${channel.id})` : 'Unknown', inline: true },
+      { name: 'Note', value: 'If you can see this in the log channel, routing works.', inline: false },
+    ],
+  });
+}
+
+function buildSummaryEmbed({ status, scopeLabel, channel, entries, testResults }) {
   const embed = new EmbedBuilder()
     .setTitle('Message Log Configuration')
     .setDescription('Non-public confirmation of your message log settings.')
-    .setColor(status === 'enable' ? 0x2ecc71 : status === 'disable' ? 0xed4245 : 0xffd166)
+    .setColor(STATUS_COLORS[status] || STATUS_COLORS.current)
     .setTimestamp(new Date())
     .addFields(
       { name: 'Action', value: status === 'current' ? 'Show current setup' : status.charAt(0).toUpperCase() + status.slice(1), inline: true },
@@ -29,6 +64,10 @@ function buildSummaryEmbed({ status, scopeLabel, channel, entries }) {
 
   for (const [label, entry] of entries) {
     embed.addFields({ name: label, value: formatEntry(entry), inline: false });
+  }
+
+  if (testResults) {
+    embed.addFields({ name: 'Test send', value: formatTestResults(testResults), inline: false });
   }
 
   return embed;
@@ -83,6 +122,7 @@ module.exports = {
         .addChoices(
           { name: 'enable', value: 'enable' },
           { name: 'disable', value: 'disable' },
+          { name: 'test send', value: 'test' },
           { name: 'current setup', value: 'current' },
         ))
     .addStringOption(option =>
@@ -115,6 +155,8 @@ module.exports = {
     const status = interaction.options.getString('status', true);
     const scope = interaction.options.getString('event', true);
     const channel = interaction.options.getChannel('channel', true);
+    const isTest = status === 'test';
+    const shouldEnable = status === 'enable' || isTest;
 
     const guild = interaction.guild;
     if (!guild) {
@@ -135,11 +177,12 @@ module.exports = {
     }
 
     const entries = [];
+    let testResults = null;
 
     try {
       if (status !== 'current') {
         for (const key of keys) {
-          if (status === 'enable') {
+          if (shouldEnable) {
             // Set channel first to guarantee routing path exists when enabling.
             await logChannelTypeStore.setChannel(guild.id, key, channel.id);
             await logChannelTypeStore.setEnabled(guild.id, key, true);
@@ -159,7 +202,25 @@ module.exports = {
         ? 'All message events'
         : `${scope.charAt(0).toUpperCase()}${scope.slice(1)} messages`;
 
-      const embed = buildSummaryEmbed({ status, scopeLabel, channel, entries });
+      if (isTest) {
+        testResults = [];
+        for (const key of keys) {
+          try {
+            const sent = await logSender.sendLog({
+              guildId: guild.id,
+              logType: key,
+              embed: buildTestEmbed({ logKey: key, channel, requester: interaction.user }),
+              client: interaction.client,
+            });
+            testResults.push({ key, ok: Boolean(sent) });
+          } catch (err) {
+            console.error(`Failed to send test for ${key}:`, err);
+            testResults.push({ key, ok: false, error: err?.message || 'Unknown error' });
+          }
+        }
+      }
+
+      const embed = buildSummaryEmbed({ status, scopeLabel, channel, entries, testResults });
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     } catch (err) {

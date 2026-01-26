@@ -1,10 +1,28 @@
 const { SlashCommandBuilder, PermissionsBitField, ChannelType } = require('discord.js');
 const logChannelTypeStore = require('../utils/logChannelTypeStore');
+const logSender = require('../utils/logSender');
+const { buildLogEmbed } = require('../utils/logEmbedFactory');
 
 const LOG_KEY = 'invite';
+const TEST_COLOR = 0x3498db;
 
 function formatStatus(enabled) {
   return enabled ? 'enabled' : 'disabled';
+}
+
+function buildTestEmbed(channelId, requester) {
+  return buildLogEmbed({
+    action: 'Invite Log Test',
+    target: requester || 'System',
+    actor: requester || 'System',
+    reason: 'Testing invite log routing',
+    color: TEST_COLOR,
+    extraFields: [
+      { name: 'Route', value: 'invite_create → invite', inline: true },
+      { name: 'Channel', value: channelId ? `<#${channelId}>` : 'No channel set', inline: true },
+      { name: 'Note', value: 'If you can see this in the log channel, invite logs are wired correctly.', inline: false },
+    ],
+  });
 }
 
 module.exports = {
@@ -21,6 +39,7 @@ module.exports = {
         .addChoices(
           { name: 'enable', value: 'enable' },
           { name: 'disable', value: 'disable' },
+          { name: 'test send', value: 'test' },
         ))
     .addChannelOption(option =>
       option
@@ -39,7 +58,8 @@ module.exports = {
 
     const status = interaction.options.getString('status', true);
     const channel = interaction.options.getChannel('channel', false);
-    const enable = status === 'enable';
+    const isTest = status === 'test';
+    const enable = status === 'enable' || isTest;
 
     let existingEntry = null;
     try {
@@ -50,7 +70,7 @@ module.exports = {
 
     if (enable && !channel && !existingEntry?.channelId) {
       return interaction.reply({
-        content: 'Please select a channel to enable invite logs.',
+        content: `Please select a channel to ${isTest ? 'test' : 'enable'} invite logs.`,
         ephemeral: true,
       });
     }
@@ -94,7 +114,11 @@ module.exports = {
       if (channel) {
         await logChannelTypeStore.setChannel(interaction.guildId, LOG_KEY, channel.id);
       }
-      await logChannelTypeStore.setEnabled(interaction.guildId, LOG_KEY, enable);
+      if (enable) {
+        await logChannelTypeStore.setEnabled(interaction.guildId, LOG_KEY, true);
+      } else if (status === 'disable') {
+        await logChannelTypeStore.setEnabled(interaction.guildId, LOG_KEY, false);
+      }
     } catch (err) {
       console.error('Failed to update invite log config:', err);
       return interaction.reply({ content: 'Failed to update invite log configuration.', ephemeral: true });
@@ -103,8 +127,27 @@ module.exports = {
     const targetChannelId = channel?.id || existingEntry?.channelId;
     const channelText = targetChannelId ? `<#${targetChannelId}>` : 'No channel set';
 
+    let testMessage = '';
+    if (isTest) {
+      const testEmbed = buildTestEmbed(targetChannelId, interaction.user);
+      let ok = false;
+      try {
+        ok = await logSender.sendLog({
+          guildId: interaction.guildId,
+          logType: 'invite_create',
+          embed: testEmbed,
+          client: interaction.client,
+        });
+      } catch (err) {
+        console.error('Failed to send invite log test:', err);
+      }
+      testMessage = ok
+        ? '\nTest log: ✅ delivered. Check the configured channel.'
+        : '\nTest log: ❌ could not be delivered. Please check channel permissions and routing.';
+    }
+
     return interaction.reply({
-      content: `Invite logs are now **${formatStatus(enable)}**. Channel: ${channelText}.`,
+      content: `Invite logs are now **${formatStatus(enable)}**. Channel: ${channelText}.${testMessage}`,
       ephemeral: true,
     });
   },
