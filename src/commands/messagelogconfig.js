@@ -16,6 +16,12 @@ const STATUS_COLORS = {
   current: 0xffd166,
   test: 0x3498db,
 };
+const LOG_COLORS = {
+  message_create: 0x00ff73,
+  message_delete: 0xed4245,
+  message_edit: 0xffd166,
+  message: 0x5865f2,
+};
 
 function formatEntry(entry) {
   const enabledText = entry?.enabled === false ? 'Disabled' : 'Enabled';
@@ -36,12 +42,13 @@ function formatTestResults(results) {
 }
 
 function buildTestEmbed({ logKey, channel, requester }) {
+  const color = LOG_COLORS[logKey] ?? STATUS_COLORS.test;
   return buildLogEmbed({
     action: 'Message Log Test',
     target: requester || 'System',
     actor: requester || 'System',
     reason: `Testing routing for ${prettyKey(logKey)}.`,
-    color: STATUS_COLORS.test,
+    color,
     extraFields: [
       { name: 'Route', value: prettyKey(logKey), inline: true },
       { name: 'Channel', value: channel ? `<#${channel.id}> (${channel.id})` : 'Unknown', inline: true },

@@ -5,6 +5,14 @@ const { buildLogEmbed } = require('../utils/logEmbedFactory');
 
 const INVITE_LOG_COLOR = 0x00f0ff;
 
+function formatUserTag(user, fallback = 'Unknown') {
+  if (!user) return fallback;
+  if (typeof user === 'string') return user;
+  const tag = user.tag || user.username || user.globalName || 'Unknown';
+  const id = user.id || 'unknown';
+  return `${tag} (${id})`;
+}
+
 async function safeLog(guild, type, embed) {
   if (!guild) return;
   try {
@@ -71,17 +79,22 @@ function buildGuildEmbed(action, guild, reason, color) {
 }
 
 function buildInviteEmbed(action, guild, details, color) {
+  const inviteLink = details.link || (details.code ? `https://discord.gg/${details.code}` : 'Unknown invite');
+  const inviterLabel = details.inviter || formatUserTag(details.creator, 'Unknown');
+
   return buildLogEmbed({
     action,
-    target: `Invite: ${details.code}`,
-    actor: 'System',
-    reason: details.reason,
+    target: details.creator || inviterLabel || `Invite: ${details.code}`,
+    actor: details.creator || 'System',
+    reason: details.reason || 'Invite activity',
     color,
     extraFields: [
+      { name: 'Link', value: inviteLink, inline: false },
       { name: 'Channel', value: details.channel || 'Unknown', inline: true },
-      { name: 'Inviter', value: details.inviter || 'Unknown', inline: true },
-      { name: 'Uses', value: `${details.uses}`, inline: true },
+      { name: 'Inviter', value: inviterLabel || 'Unknown', inline: true },
+      { name: 'Uses', value: `${details.uses ?? 0}`, inline: true },
     ],
+    thumbnailTarget: details.thumbnailTarget || details.creator || null,
   });
 }
 
@@ -329,12 +342,17 @@ async function handleInviteCreate(invite) {
   const guild = invite.guild;
   if (!guild) return;
   inviteTracker.addInvite(invite);
+  const inviterLabel = invite.inviter ? `${invite.inviter.tag} (${invite.inviter.id})` : 'Unknown';
+  const inviteLink = invite.url || (invite.code ? `https://discord.gg/${invite.code}` : 'Unknown invite');
   const embed = buildInviteEmbed('Invite Created', guild, {
     code: invite.code,
+    link: inviteLink,
     channel: invite.channelId ? `<#${invite.channelId}>` : 'Unknown',
-    inviter: invite.inviter ? `${invite.inviter.tag} (${invite.inviter.id})` : 'Unknown',
+    inviter: inviterLabel,
+    creator: invite.inviter || inviterLabel,
     uses: invite.uses ?? 0,
     reason: 'Invite generated',
+    thumbnailTarget: invite.inviter || null,
   }, INVITE_LOG_COLOR);
   await safeLog(guild, 'invite_create', embed);
 }
@@ -343,12 +361,17 @@ async function handleInviteDelete(invite) {
   const guild = invite.guild || invite.inviter?.guild;
   if (!guild) return;
   inviteTracker.removeInvite(guild.id, invite.code);
+  const inviterLabel = invite.inviter ? `${invite.inviter.tag} (${invite.inviter.id})` : 'Unknown';
+  const inviteLink = invite.url || (invite.code ? `https://discord.gg/${invite.code}` : 'Unknown invite');
   const embed = buildInviteEmbed('Invite Deleted', guild, {
     code: invite.code,
+    link: inviteLink,
     channel: invite.channelId ? `<#${invite.channelId}>` : 'Unknown',
-    inviter: invite.inviter ? `${invite.inviter.tag} (${invite.inviter.id})` : 'Unknown',
+    inviter: inviterLabel,
+    creator: invite.inviter || inviterLabel,
     uses: invite.uses ?? 0,
     reason: 'Invite removed',
+    thumbnailTarget: invite.inviter || null,
   }, INVITE_LOG_COLOR);
   await safeLog(guild, 'invite_delete', embed);
 }

@@ -159,6 +159,7 @@ module.exports = {
         // Attempt to detect the invite used
         try {
             if (usedInvite) {
+                const inviteLink = usedInvite.url || (usedInvite.code ? `https://discord.gg/${usedInvite.code}` : 'Unknown invite');
                 const inviterLabel = usedInvite.inviterTag
                     ? `${usedInvite.inviterTag} (${usedInvite.inviterId})`
                     : usedInvite.inviterId
@@ -171,6 +172,7 @@ module.exports = {
                     reason: `Invite ${usedInvite.code} used`,
                     color: INVITE_LOG_COLOR,
                     extraFields: [
+                        { name: 'Link', value: inviteLink, inline: false },
                         { name: 'Channel', value: usedInvite.channelId ? `<#${usedInvite.channelId}>` : 'Unknown', inline: true },
                         {
                             name: 'Inviter',
@@ -179,6 +181,7 @@ module.exports = {
                         },
                         { name: 'Uses', value: `${usedInvite.uses}${usedInvite.maxUses ? ` / ${usedInvite.maxUses}` : ''}`, inline: true },
                     ],
+                    thumbnailTarget: member.user,
                 });
 
                 await logSender.sendLog({
