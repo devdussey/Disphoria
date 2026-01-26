@@ -441,7 +441,7 @@ function registerHandlers(client) {
 }
 
 module.exports = {
-  name: Events.Ready,
+  name: Events.ClientReady,
   once: true,
   async execute(client) {
     await inviteTracker.initialize(client);

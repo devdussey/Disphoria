@@ -13,13 +13,24 @@ const {
 } = require('discord.js');
 const { resolveEmbedColour } = require('./guildColourStore');
 
+function hasExplicitColor(embed) {
+  if (!embed) return false;
+  // EmbedBuilder stores colour on the internal data object; raw API payloads use `color`.
+  if (typeof embed.data?.color === 'number') return true;
+  if (typeof embed.color === 'number') return true;
+  if (typeof embed?.toJSON === 'function' && typeof embed.toJSON()?.color === 'number') return true;
+  return false;
+}
+
 function normalizeEmbeds(rawEmbeds, guildId) {
   if (!Array.isArray(rawEmbeds) || !guildId) return rawEmbeds;
   const colour = resolveEmbedColour(guildId);
   return rawEmbeds.map((embed) => {
     try {
       const builder = embed instanceof EmbedBuilder ? embed : EmbedBuilder.from(embed);
-      builder.setColor(colour);
+      if (!hasExplicitColor(builder)) {
+        builder.setColor(colour);
+      }
       return builder;
     } catch (_) {
       return embed;
